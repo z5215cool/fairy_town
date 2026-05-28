@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>童话镇多智能体系统</title>
+    <link rel="stylesheet" href="styles.css">
+    <!-- 移除了 Font Awesome CDN 引用以避免浏览器跟踪防护问题 -->
+    <style>
+        /* 基本图标样式替代 Font Awesome */
+        .icon-castle::before { content: "🏰"; }
+        .icon-plus::before { content: "+"; font-weight: bold; }
+        .icon-cog::before { content: "⚙️"; }
+        .icon-users::before { content: "👥"; }
+        .icon-sync-alt::before { content: "🔄"; }
+        .icon-home::before { content: "🏠"; }
+        .icon-comments::before { content: "💬"; }
+        .icon-check-circle::before { content: "✅"; }
+        .icon-exclamation-circle::before { content: "⚠️"; }
+        .icon-info-circle::before { content: "ℹ️"; }
+        .icon-circle::before { content: "●"; }
+        .icon-pause::before { content: "⏸️"; }
+        .icon-play::before { content: "▶️"; }
+        
+        /* 图标按钮样式 */
+        .btn-icon i, .btn-icon .icon {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            line-height: 16px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <!-- 顶部导航栏 -->
+        <header class="header">
+            <div class="logo">
+                <span class="icon icon-castle"></span>
+                <h1>童话镇多智能体系统</h1>
+            </div>
+            <div class="header-controls">
+                <button class="btn btn-primary" id="new-story-btn">
+                    <span class="icon icon-plus"></span> 新故事
+                </button>
+                <button class="btn btn-secondary" id="settings-btn">
+                    <span class="icon icon-cog"></span> 设置
+                </button>
+            </div>
+        </header>
+
+        <main class="main-content">
+            <!-- 左侧面板：角色管理 -->
+            <aside class="sidebar-left">
+                <div class="panel character-panel">
+                    <div class="panel-header">
+                        <h2><span class="icon icon-users"></span> 角色列表</h2>
+                    </div>
+                    
+                    <div class="character-list" id="character-list">
+                        <!-- 角色卡片将通过 JavaScript 动态生成 -->
+                    </div>
+                </div>
+
+
+            </aside>
+
+            <!-- 中间：场景可视化区域 -->
+            <section class="scene-container">
+                <div class="scene-toolbar">
+                    <div class="scene-info">
+                        <span id="scene-name">童话镇广场</span>
+                        <span class="scene-time" id="scene-time">白天</span>
+                    </div>
+                    <div class="scene-controls">
+                        <button class="btn-icon" id="pause-performance" title="暂停表演" style="display: none;">
+                            <span class="icon icon-pause"></span>
+                        </button>
+                        <button class="btn-icon" id="resume-performance" title="继续表演" style="display: none;">
+                            <span class="icon icon-play"></span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="scene-canvas" id="scene-canvas">
+                    <!-- 场景背景 -->
+                    <div class="scene-background">
+                        <div class="sky"></div>
+                        <div class="ground"></div>
+                        <div class="castle"></div>
+                        <div class="trees"></div>
+                        <div class="flowers"></div>
+                    </div>
+
+                    <!-- 角色在场景中的位置 -->
+                    <div class="characters-container" id="characters-container">
+                        <!-- 角色将通过 JavaScript 动态添加 -->
+                    </div>
+
+                    <!-- 对话气泡 -->
+                    <div class="dialogue-bubbles" id="dialogue-bubbles">
+                        <!-- 对话气泡 -->
+                    </div>
+                </div>
+
+
+            </section>
+
+            <!-- 右侧面板：文本输入和剧情 -->
+            <aside class="sidebar-right">
+                <!-- 文本输入面板 -->
+                <div class="panel text-input-panel">
+                    <div class="panel-header">
+                        <h2><span class="icon icon-book"></span> 故事输入</h2>
+                    </div>
+                    <div class="text-input-content">
+                        <textarea id="story-input" placeholder="请输入小说文本或剧本内容...&#10;&#10;示例：&#10;小红帽走进了森林，遇到了一只大灰狼。大灰狼问她要去哪里，小红帽说要去奶奶家送蛋糕。"></textarea>
+                        <div class="text-actions">
+                            <button class="btn btn-primary" id="analyze-text">
+                                <span class="icon icon-magic"></span> 分析文本
+                            </button>
+                            <button class="btn btn-secondary" id="load-sample">
+                                <span class="icon icon-file-alt"></span> 加载示例
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 角色识别结果 -->
+                <!-- 已删除 -->
+
+                <!-- 剧情预测面板 -->
+                <div class="panel plot-prediction-panel" id="prediction-panel" style="display: none;">
+                    <div class="panel-header">
+                        <h2><span class="icon icon-crystal-ball"></span> 剧情预测</h2>
+                        <button class="btn-icon btn-close" id="close-prediction">
+                            <span class="icon icon-times"></span>
+                        </button>
+                    </div>
+                    <div class="prediction-content">
+                        <div class="prediction-options" id="prediction-options">
+                            <!-- 预测选项 -->
+                        </div>
+                        <button class="btn btn-primary" id="generate-prediction">
+                            <span class="icon icon-lightbulb"></span> 生成预测
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 系统状态 -->
+                <div class="panel status-panel">
+                    <div class="panel-header">
+                        <h2><span class="icon icon-info-circle"></span> 系统状态</h2>
+                    </div>
+                    <div class="status-content">
+                        <div class="status-item">
+                            <span class="status-label">连接状态</span>
+                            <span class="status-value" id="connection-status">
+                                <span class="icon icon-circle status-offline"></span> 未连接
+                            </span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">角色数量</span>
+                            <span class="status-value" id="character-count">0</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">场景状态</span>
+                            <span class="status-value" id="scene-status">就绪</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-label">最后更新</span>
+                            <span class="status-value" id="last-update">--:--:--</span>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+        </main>
+
+        <!-- 角色交互面板 (移出侧边栏，设为浮动) -->
+        <div class="panel interaction-panel" id="interaction-panel" style="display: none;">
+            <div class="panel-header" id="interaction-header">
+                <h2><span class="icon icon-comments"></span> 角色交互</h2>
+                <button class="btn-icon btn-close" id="close-interaction">
+                    <span class="icon icon-times"></span>
+                </button>
+            </div>
+            <div class="interaction-content">
+                <div class="selected-character-info">
+                    <div class="character-avatar-large">
+                        <span class="icon icon-user-circle"></span>
+                    </div>
+                    <div>
+                        <h3 id="selected-character-name">角色名称</h3>
+                        <p id="selected-character-role">角色角色</p>
+                    </div>
+                </div>
+                <div class="dialogue-history" id="dialogue-history">
+                    <!-- 对话历史 -->
+                </div>
+                <div class="dialogue-controls">
+                    <button class="btn btn-secondary" id="pause-dialogue">
+                        <span class="icon icon-pause"></span> 暂停
+                    </button>
+                    <button class="btn btn-secondary" id="continue-dialogue" style="display:none;">
+                        <span class="icon icon-play"></span> 继续
+                    </button>
+                    <select id="dialogue-speed">
+                        <option value="2000">慢速</option>
+                        <option value="1000" selected>中速</option>
+                        <option value="500">快速</option>
+                        <option value="0">即时</option>
+                    </select>
+                </div>
+                <div class="dialogue-input">
+                    <textarea id="dialogue-textarea" placeholder="输入对话内容..."></textarea>
+                    <button class="btn btn-primary" id="send-dialogue">
+                        <span class="icon icon-paper-plane"></span> 发送
+                    </button>
+                </div>
+            </div>
+            <div
+                class="interaction-resize-handle"
+                id="interaction-resize-handle"
+                title="拖拽缩放"
+                aria-label="拖拽缩放交互框"
+            ></div>
+        </div>
+
+        <!-- 底部状态栏 -->
+        <footer class="footer">
+            <div class="footer-info">
+                <span id="system-message">系统就绪，等待输入...</span>
+            </div>
+            <div class="footer-controls">
+                <button class="btn-icon" id="help-btn" title="帮助">
+                    <span class="icon icon-question-circle"></span>
+                </button>
+                <button class="btn-icon" id="about-btn" title="关于">
+                    <span class="icon icon-info-circle"></span>
+                </button>
+            </div>
+        </footer>
+    </div>
+
+    <!-- 模态框：设置 -->
+    <div class="modal" id="settings-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>系统设置</h2>
+                <button class="btn-icon btn-close" id="close-settings">
+                    <span class="icon icon-times"></span>
+                </button>
+            </div>
+            <div class="modal-body">
+                    <div class="setting-group">
+                        <label>动画效果</label>
+                        <input type="checkbox" id="animation-toggle" checked>
+                        <span>启用动画</span>
+                    </div>
+                    <div class="setting-group">
+                        <label>音效</label>
+                        <input type="checkbox" id="sound-toggle">
+                        <span>启用音效</span>
+                    </div>
+                    <div class="setting-group">
+                        <label>自动保存</label>
+                        <input type="checkbox" id="autosave-toggle" checked>
+                        <span>自动保存故事</span>
+                    </div>
+                    
+                    <hr class="modal-divider">
+                    
+                    <h3>AI图片生成设置</h3>
+                    <div class="setting-group">
+                        <label>nanobanana API密钥</label>
+                        <input type="password" id="api-key-input" placeholder="请输入API密钥">
+                    </div>
+                    <div class="setting-group">
+                        <label>图片尺寸</label>
+                        <select id="image-size-select">
+                            <option value="1K">1K (1024x1024)</option>
+                            <option value="2K" selected>2K (2048x2048)</option>
+                            <option value="4K">4K (4096x4096)</option>
+                        </select>
+                    </div>
+                    <div class="setting-group">
+                        <button class="btn btn-secondary btn-check-balance" id="check-balance-btn">
+                            <span class="icon icon-wallet"></span> 查询余额
+                        </button>
+                        <span id="balance-display"></span>
+                    </div>
+                </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="cancel-settings">取消</button>
+                <button class="btn btn-primary" id="save-settings">保存设置</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 模态框：帮助 -->
+    <div class="modal" id="help-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>使用帮助</h2>
+                <button class="btn-icon btn-close" id="close-help">
+                    <span class="icon icon-times"></span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="help-section">
+                    <h3>快速开始</h3>
+                    <ol>
+                        <li>在右侧文本框中输入故事内容</li>
+                        <li>点击"分析文本"按钮识别角色</li>
+                        <li>在场景中查看和交互角色</li>
+                        <li>使用控制面板移动和控制角色</li>
+                    </ol>
+                </div>
+                <div class="help-section">
+                    <h3>角色交互</h3>
+                    <ul>
+                        <li>点击角色卡片上的交互按钮进行对话</li>
+                        <li>使用移动按钮控制角色位置</li>
+                        <li>点击场景中的角色直接交互</li>
+                    </ul>
+                </div>
+                <div class="help-section">
+                    <h3>剧情预测</h3>
+                    <p>系统可以根据当前故事内容预测可能的剧情发展方向。</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+    <script src="performance-player.js"></script>
+</body>
+</html>
