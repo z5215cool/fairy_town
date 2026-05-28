@@ -174,16 +174,31 @@ describe('人物移动功能', () => {
             emotion: 'neutral'
         }];
         
+        // Mock performance.now and requestAnimationFrame
+        let perfNow = 0;
+        global.performance = { now: () => perfNow };
+        let rafCallback = null;
+        global.requestAnimationFrame = vi.fn((cb) => {
+            rafCallback = cb;
+            return 1;
+        });
+        
         // 启动平滑移动
         const promise = movementController.moveToPosition('char-1', 90, 90, { smooth: true });
         
-        // 模拟动画完成
-        vi.advanceTimersByTime(5000);
+        // 模拟动画帧执行，推进时间直到完成
+        // 距离 = sqrt((90-10)^2 + (90-10)^2) = sqrt(12800) ≈ 113
+        // duration = (113 / 2) * 100 = 5650ms
+        for (let i = 0; i < 60; i++) {
+            perfNow = i * 100;
+            if (rafCallback) rafCallback();
+        }
         
         await promise;
         
+        // X 应该到 90，但 Y 被限制在 maxY=85
         expect(system.characters[0].position.x).toBe(90);
-        expect(system.characters[0].position.y).toBe(90);
+        expect(system.characters[0].position.y).toBe(85); // clamped to maxY
     });
 
     it('移动不存在的角色应返回错误', () => {

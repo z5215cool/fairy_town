@@ -53,10 +53,14 @@ def test_memory_window():
  state = GameState(memory_window_size=3)
  for i in range(6):
   state.add_turn(f"第{i+1}段故事", make_provider_output(f"回复{i+1}"))
-  window = state._get_windowed_turns()
-  assert len(window) == 3
-  assert window[0].prompt == "第4段故事"
-  print("✅ test_memory_window passed")
+ 
+ # 验证添加6个turn后，窗口只保留最近3个
+ window = state._get_windowed_turns()
+ assert len(window) == 3
+ assert window[0].prompt == "第4段故事"
+ assert window[1].prompt == "第5段故事"
+ assert window[2].prompt == "第6段故事"
+ print("✅ test_memory_window passed")
 
 def test_get_summary():
  state = GameState(characters=CHARACTERS, story_background=BACKGROUND)
