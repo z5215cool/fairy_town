@@ -13,7 +13,7 @@ class QwenProvider(Provider):
         return "qwen"
 
     def __init__(self, api_key: str | None = None, default_model: str = "qwen-plus"):
-        self._api_key = api_key or os.environ["DASHSCOPE_API_KEY"]
+        self._api_key = api_key or os.environ.get('DASHSCOPE_API_KEY', '')
         self._default_model = default_model
 
     def _call(self, prompt: str, history: list[str], params: dict) -> dict:

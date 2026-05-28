@@ -13,7 +13,7 @@ class DeepSeekProvider(Provider):
         return "deepseek"
 
     def __init__(self, api_key: str | None = None, default_model: str = "deepseek-chat"):
-        self._api_key = api_key or os.environ["API-KEY"]
+        self._api_key = api_key or os.environ.get('DEEPSEEK_API_KEY', '')
         self._default_model = default_model
 
     def _call(self, prompt: str, history: list[str], params: dict) -> dict:

@@ -13,7 +13,7 @@ class DoubaoProvider(Provider):
         return "doubao"
 
     def __init__(self, api_key: str | None = None, default_model: str = "doubao-pro-32k"):
-        self._api_key = api_key or os.environ["DOUBAO_API_KEY"]
+        self._api_key = api_key or os.environ.get('DOUBAO_API_KEY', '')
         self._default_model = default_model
 
     def _call(self, prompt: str, history: list[str], params: dict) -> dict:
