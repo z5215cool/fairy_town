@@ -89,6 +89,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 try:
     from config.settings import config
     from provider.deepseek import DeepSeekProvider
+    from provider.qwen import QwenProvider
     from game_core.game_state import GameState
     from game_core.director import PlotDirector
     from memory import MemoryStore
@@ -213,10 +214,17 @@ def get_llm_provider():
     global llm_provider
     if llm_provider is None and config:
         try:
-            api_key = config.get('DEEPSEEK_API_KEY', '')
-            if api_key:
-                llm_provider = DeepSeekProvider(api_key=api_key)
-                print("LLM提供者已初始化 (DeepSeek)")
+            # 优先使用 Qwen API
+            qwen_api_key = config.get('QWEN_API_KEY', '')
+            if qwen_api_key:
+                llm_provider = QwenProvider(api_key=qwen_api_key)
+                print("LLM提供者已初始化 (Qwen)")
+            else:
+                # 备用 DeepSeek
+                api_key = config.get('DEEPSEEK_API_KEY', '')
+                if api_key:
+                    llm_provider = DeepSeekProvider(api_key=api_key)
+                    print("LLM提供者已初始化 (DeepSeek)")
         except Exception as e:
             print(f"初始化LLM失败: {e}")
     return llm_provider
@@ -556,7 +564,6 @@ def extract_actions_by_rules(text: str, characters: List[Dict]) -> List[Dict[str
             
             # 如果还是没有找到，检查是否有"去+地点"模式
             if not target:
-                import re
                 # 匹配"去奶奶家"、"前往森林"等模式
                 go_patterns = [r'去([\u4e00-\u9fa5]{2,6})', r'前往([\u4e00-\u9fa5]{2,6})']
                 for pattern in go_patterns:
