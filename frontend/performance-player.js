@@ -577,15 +577,15 @@ class PerformancePlayer {
             existingBubble.remove();
         }
 
-        // 获取说话者的初始位置
+        // 获取说话者的位置（气泡定位在角色正上方）
         let leftPos = '50%';
-        let topPos = '30%';
+        let topPos = '50%';
         
         if (this.system && this.system.characters) {
             const character = this.system.characters.find(c => c.name === step.speaker);
             if (character && character.position) {
                 leftPos = `${character.position.x}%`;
-                topPos = `${character.position.y - 15}%`;
+                topPos = `${character.position.y}%`;
             }
         }
 
@@ -607,20 +607,20 @@ class PerformancePlayer {
         bubble.appendChild(speakerElement);
         bubble.appendChild(contentElement);
 
-        // 设置气泡初始位置
+        // 设置气泡位置（通过 CSS transform 偏移到角色正上方）
         bubble.style.left = leftPos;
         bubble.style.top = topPos;
         bubble.style.position = 'absolute';
         
         bubblesContainer.appendChild(bubble);
 
-        // 淡入动画
+        // 淡入动画（气泡从角色头顶上方出现）
         bubble.style.opacity = '0';
-        bubble.style.transform = 'translateY(10px)';
+        bubble.style.transform = 'translate(-50%, calc(-100% - 60px))';
         
         await this._animateElement(bubble, { 
             opacity: 1, 
-            transform: 'translateY(0)' 
+            transform: 'translate(-50%, calc(-100% - 90px))' 
         }, 300);
 
         // 开始跟随人物移动的动画循环
@@ -634,11 +634,8 @@ class PerformancePlayer {
                 : null;
             
             if (character && character.position) {
-                const targetLeft = `${character.position.x}%`;
-                const targetTop = `${character.position.y - 15}%`;
-                
-                bubble.style.left = targetLeft;
-                bubble.style.top = targetTop;
+                bubble.style.left = `${character.position.x}%`;
+                bubble.style.top = `${character.position.y}%`;
             }
 
             if (this.isPlaying && !this.isPaused) {
@@ -652,11 +649,11 @@ class PerformancePlayer {
         // 等待对话显示时间（可被暂停中断）
         await this._waitWithPause(step.duration - 300);
 
-        // 淡出动画（如果没有暂停）
+        // 淡出动画（气泡向上飘走）
         if (this.isPlaying && !this.isPaused) {
             await this._animateElement(bubble, { 
                 opacity: 0, 
-                transform: 'translateY(-10px)' 
+                transform: 'translate(-50%, calc(-100% - 30px))' 
             }, 300);
             
             bubble.remove();

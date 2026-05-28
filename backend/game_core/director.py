@@ -561,6 +561,25 @@ class PlotDirector:
                     'target_element': 'dialogue-bubble'
                 })
             
+            elif action_type == 'meet':
+                # 处理相遇事件
+                characters = action.get('characters', [])
+                content = action.get('content', '')
+                
+                # 如果没有content，自动生成
+                if not content and len(characters) >= 2:
+                    content = f"{characters[0]}与{characters[1]}相遇了"
+                elif not content and len(characters) == 1:
+                    content = f"{characters[0]}遇到了某人"
+                
+                sequence.append({
+                    'step_id': len(sequence) + 1,
+                    'type': 'narrative_display',
+                    'content': content,
+                    'duration': 2500,
+                    'target_element': 'narrative-panel'
+                })
+            
             else:
                 # 处理其他动作（表情变化等）
                 if action_type == 'emotion':

@@ -454,52 +454,51 @@ def extract_actions_by_rules(text: str, characters: List[Dict]) -> List[Dict[str
     known_characters = [char.get('name', '').strip() for char in characters if char.get('name')]
     
     # 扩展的对话动词列表
-    speak_verbs = r'(说|问|道|应道|答道|回答|喊道|叫着|说道|问到|问到|说着|回应|喊|吼|低声嘀咕|冷笑)'
+    speak_verbs = r'(?:说|问|道|应道|答道|回答|喊道|叫着|说道|问到|说着|回应|喊|吼|低声嘀咕|冷笑)'
     
     # 用于存储已提取的对话，避免重复
     extracted_dialogues = set()
     
-    # 对每个已知角色，搜索他们说的话
-    for char_name in known_characters:
-        if not char_name:
+    # 策略：先找出所有引号对话，然后根据上下文确定说话者
+    # 匹配模式：角色名 + 可选修饰词 + 动词 + 冒号 + 引号对话
+    # 关键改进：使用负向前瞻确保角色名和动词之间没有其他角色名
+    char_names_pattern = '|'.join(re.escape(name) for name in known_characters if name)
+    
+    dialogue_pattern = re.compile(
+        r'(' + char_names_pattern + r')'  # group 1: 角色名
+        r'((?:(?!' + char_names_pattern + r').){0,30}?)'  # group 2: 修饰词（不包含其他角色名）
+        + speak_verbs +  # 说话动词（非捕获组）
+        r'(.{0,5}?)'  # group 3: 可选宾语（如"她"、"他"）
+        r'[：:]'  # 冒号
+        r'[""]([^""]{2,200})[""]'  # group 4: 引号对话
+    )
+    
+    for match in dialogue_pattern.finditer(text):
+        char_name = match.group(1)
+        content = match.group(4).strip()
+        
+        # 过滤掉太短或无效的内容
+        if not content or len(content) < 2:
             continue
         
-        # 使用更精确的模式：角色名后面跟着动词，然后是冒号和对话
-        patterns_for_char = [
-            # 精确匹配：角色名 + 动词 + 冒号 + 引号对话
-            # 使用\b确保角色名在词边界处
-            r'\b' + re.escape(char_name) + r'\b[，。！？\s]*' + speak_verbs + r'[：:]["“]([^"”]+)["”]',
-            # 角色名 + 动词 + 冒号 + 无引号对话
-            r'\b' + re.escape(char_name) + r'\b[，。！？\s]*' + speak_verbs + r'[：:]([^，。！？"“”]{1,200})[，。！？]',
-        ]
+        # 去除开头的引号
+        if content.startswith('"') or content.startswith('“'):
+            content = content[1:]
+        if content.endswith('"') or content.endswith('”'):
+            content = content[:-1]
         
-        for pattern in patterns_for_char:
-            matches = re.findall(pattern, text)
-            for match in matches[:5]:  # 每个角色最多提取5句对话
-                # 匹配结果就是对话内容
-                content = match.strip() if isinstance(match, str) else match[-1].strip()
-                
-                # 过滤掉太短或无效的内容
-                if not content or len(content) < 3:
-                    continue
-                
-                # 去除开头的引号
-                if content.startswith('"') or content.startswith('“'):
-                    content = content[1:]
-                if content.endswith('"') or content.endswith('”'):
-                    content = content[:-1]
-                
-                # 检查是否已提取过相同的对话（去重）
-                content_key = content[:50]
-                if content_key in extracted_dialogues:
-                    continue
-                extracted_dialogues.add(content_key)
-                
-                # 限制长度但不截断中间
-                if len(content) > 60:
-                    content = content[:57] + "..."
-                
-                actions.append(create_action('speak', character=char_name, content=content))
+        # 检查是否已提取过相同的对话（去重）
+        content_key = content[:50]
+        if content_key in extracted_dialogues:
+            continue
+        extracted_dialogues.add(content_key)
+        
+        # 限制长度但不截断中间
+        if len(content) > 60:
+            content = content[:57] + "..."
+        
+        actions.append(create_action('speak', character=char_name, content=content))
+        logger.info(f"提取到对话: {char_name}: {content[:30]}...")
     
     # 3. 检测相遇事件
     meet_keywords = [
