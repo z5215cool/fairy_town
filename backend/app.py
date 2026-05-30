@@ -11,7 +11,7 @@ from flask_cors import CORS
 from typing import Optional, List, Dict, Any
 import sys
 import logging
-from game_core.story_parser import split_into_episodes, extract_locations_and_initial_positions, generate_actions_for_episode
+
 # ==================== 动作协议定义 ====================
 # 统一动作格式，供AI输出和前端播放使用
 
@@ -95,6 +95,7 @@ try:
     from prompt_generator import generate_map_prompt, generate_character_prompt, generate_all_prompts
     from image_generator import create_image_generator, generate_map_image, generate_character_image
     from asset_manager import create_asset_manager, save_map_asset, save_character_asset, save_all_assets
+    from map_analyzer import analyze_story_locations
 except ImportError as e:
     print(f"警告: 无法导入配置模块 - {e}")
     config = None
@@ -111,6 +112,7 @@ except ImportError as e:
     save_map_asset = None
     save_character_asset = None
     save_all_assets = None
+    analyze_story_locations = None
 
 app = Flask(__name__)
 
@@ -318,10 +320,40 @@ def extract_characters_by_ai(text: str, provider) -> list:
 
 def extract_characters_from_text(text: str, provider=None) -> list:
     """从文本中提取角色（优先使用AI，规则兜底）"""
+    # 关键角色检测：如果故事中提到了这些角色，必须确保被提取
+    # 格式：关键词 -> 角色信息
+    critical_keywords = {
+        '奶奶': '奶奶',
+        '外婆': '奶奶',
+        'grandma': '奶奶',
+    }
+    
+    # 检查文本中是否提到了关键角色
+    text_lower = text.lower()
+    missing_critical = []  # 需要补充的关键角色名列表
+    for keyword, role_name in critical_keywords.items():
+        if keyword.lower() in text_lower:
+            if role_name not in missing_critical:
+                missing_critical.append(role_name)
+    
     # 优先尝试AI提取
     if provider:
         ai_characters = extract_characters_by_ai(text, provider)
         if ai_characters and len(ai_characters) > 0:
+            # 检查AI是否遗漏了关键角色
+            ai_names = [c.get('name', '') for c in ai_characters]
+            for critical in missing_critical:
+                if critical not in ai_names:
+                    logger.warning(f"AI遗漏了关键角色: {critical}，补充到角色列表")
+                    # 添加缺失的关键角色
+                    ai_characters.append({
+                        'name': critical,
+                        'role': '配角',
+                        'description': '住在森林深处的老奶奶',
+                        'position': {'x': random.randint(15, 85), 'y': random.randint(20, 70)},
+                        'emotion': 'neutral',
+                        'confidence': 0.9
+                    })
             return ai_characters
         logger.info("AI角色提取失败，使用规则兜底")
 
@@ -482,10 +514,20 @@ def extract_actions_by_rules(text: str, characters: List[Dict]) -> List[Dict[str
 
     # 5. 检测移动动作
     move_keywords = ['走', '跑', '去', '移动', '走向', '跑到', '走到', '走向了', '跑去',
-                     'walk', 'run', 'go', 'move', 'walks', 'runs', 'goes', 'moves']
+                     'walk', 'run', 'go', 'move', 'walks', 'runs', 'goes', 'moves',
+                     '抄近路', '捷径', '先到']
     move_targets = ['门口', '森林', '广场', '中心', '左边', '右边', '上方', '下方',
-                    '深处', '小路', '奶奶家', 'door', 'forest', 'square', 'center',
+                    '深处', '小路', '奶奶家', '小红帽家', '外婆家', '家',
+                    'door', 'forest', 'square', 'center',
                     'left', 'right', 'top', 'bottom', 'deep', 'path']
+    
+    # 特定角色的移动目标关联（增强故事理解）
+    character_move_targets = {
+        '大灰狼': ['奶奶家', '外婆家', '小红帽家', '森林', '深处'],
+        '小红帽': ['奶奶家', '外婆家', '森林', '村庄', '广场'],
+        '猎人': ['森林', '村庄', '奶奶家'],
+        '奶奶': ['家', '屋里', '房间']
+    }
     
     for char in characters:
         char_name = char.get('name', '')
@@ -497,11 +539,32 @@ def extract_actions_by_rules(text: str, characters: List[Dict]) -> List[Dict[str
         if has_move:
             # 尝试提取目标位置
             target = ''
-            for tgt in move_targets:
-                if tgt in text:
-                    target = tgt
-                    break
-                    
+            
+            # 首先检查特定角色的目标列表
+            if char_name in character_move_targets:
+                for tgt in character_move_targets[char_name]:
+                    if tgt in text:
+                        target = tgt
+                        break
+            
+            # 如果没有找到，检查通用目标列表
+            if not target:
+                for tgt in move_targets:
+                    if tgt in text:
+                        target = tgt
+                        break
+            
+            # 如果还是没有找到，检查是否有"去+地点"模式
+            if not target:
+                import re
+                # 匹配"去奶奶家"、"前往森林"等模式
+                go_patterns = [r'去([\u4e00-\u9fa5]{2,6})', r'前往([\u4e00-\u9fa5]{2,6})']
+                for pattern in go_patterns:
+                    match = re.search(pattern, text)
+                    if match:
+                        target = match.group(1)
+                        break
+            
             if target:
                 actions.append(create_action('move', character=char_name, target=target, 
                                            content=f"{char_name}移动到{target}"))
@@ -543,13 +606,19 @@ def extract_actions_by_ai(text: str, characters: List[Dict], provider) -> List[D
 要求：
 1. 严格按照故事中的时间顺序提取
 2. 对话和动作交替进行，保持原顺序
-3. 只输出JSON数组
+3. 移动动作必须包含明确的target字段（目标地点）
+4. 只输出JSON数组
+
+动作类型说明：
+- speak: 角色对话，包含character(角色名)和content(对话内容)
+- move: 角色移动，包含character(角色名)、target(目标地点)和content(动作描述)
+- action: 其他动作，包含character(角色名)和content(动作描述)
 
 输出格式：
 [
   {{"type": "speak", "character": "小红帽", "content": "妈妈，我走了"}},
-  {{"type": "speak", "character": "妈妈", "content": "路上小心"}},
-  {{"type": "move", "character": "小红帽", "target": "森林", "content": "小红帽走进森林"}}
+  {{"type": "move", "character": "小红帽", "target": "森林", "content": "小红帽走进森林"}},
+  {{"type": "speak", "character": "大灰狼", "content": "小姑娘，你要去哪里呀？"}}
 ]
 
 故事：
@@ -642,6 +711,23 @@ def analyze_text():
     if scene:
         detected_scene = scene
 
+    # ===== 地图分析：提取地点和位置 =====
+    map_data = None
+    character_initial_positions = {}
+    
+    if analyze_story_locations:
+        try:
+            map_data = analyze_story_locations(text, detected_scene, provider)
+            logger.info(f"地图分析完成: {map_data.get('total_locations', 0)}个地点")
+            
+            # 根据地图数据设置角色初始位置
+            # 分析故事文本，确定每个角色最初出现的位置
+            if map_data and map_data.get('locations'):
+                character_initial_positions = _infer_character_initial_positions(text, characters, map_data)
+                logger.info(f"角色初始位置推断完成: {len(character_initial_positions)}个角色")
+        except Exception as e:
+            logger.warning(f"地图分析失败: {e}")
+    
     # 提取剧情点
     sentences = [s.strip() for s in text.replace('。', '.').replace('！', '!').replace('？', '?').split('.') if s.strip()]
     plot_points = []
@@ -679,6 +765,10 @@ def analyze_text():
     # 保存角色到数据存储并更新 GameState
     saved_characters = []
     for char in characters:
+        char_name = char.get('name', '')
+        # 如果有推断的初始位置，使用它；否则使用角色原有位置
+        if char_name in character_initial_positions:
+            char['position'] = character_initial_positions[char_name]
         saved_char = data_store.add_character(char)
         saved_characters.append(saved_char)
     
@@ -703,6 +793,13 @@ def analyze_text():
     if director and actions:
         try:
             logger.info(f"开始剧情导演处理，共 {len(actions)} 个动作")
+            
+            # 先设置地图数据给导演
+            if map_data and map_data.get('locations'):
+                director.set_map_locations(
+                    map_data['locations'],
+                    character_initial_positions
+                )
             
             # 生成后续选项（可以用 AI 生成，这里先用默认）
             next_options = generate_next_options(text, characters)
@@ -729,7 +826,9 @@ def analyze_text():
         'characters': saved_characters,
         'scene': detected_scene,
         'plotPoints': plot_points,
-        'actions': actions  # 保留原始动作用于调试
+        'actions': actions,  # 保留原始动作用于调试
+        'mapData': map_data,  # 地图位置数据
+        'characterInitialPositions': character_initial_positions  # 角色初始位置
     }
     
     # 如果有导演响应，添加标准化的指令包
@@ -738,6 +837,182 @@ def analyze_text():
         logger.info("已添加导演输出到响应")
     
     return jsonify(response_data)
+
+
+def _infer_character_initial_positions(text: str, characters: List[Dict], map_data: Dict) -> Dict[str, Dict[str, int]]:
+    """
+    根据故事文本和地图数据推断角色的初始位置
+    
+    智能定位规则：
+    1. 同住角色（妈妈和小红帽）应该在一起
+    2. 奶奶/外婆住在远处（森林深处）
+    3. 大灰狼等反派在中间位置（森林）
+    4. 根据故事的"从哪来、到哪去"推断位置
+    
+    参数：
+    - text: 故事文本
+    - characters: 角色列表
+    - map_data: 地图数据
+    
+    返回：
+    - 角色初始位置字典 {角色名: {x, y}}
+    """
+    positions = {}
+    locations = map_data.get('locations', [])
+    
+    if not locations or not characters:
+        return positions
+    
+    # 按角色类型分类
+    protagonist = None      # 主角（如小红帽）
+    family_members = []     # 家人（如妈妈、奶奶）
+    villain = None         # 反派（如大灰狼）
+    supporting = []        # 配角
+    
+    for char in characters:
+        char_name = char.get('name', '')
+        role = char.get('role', '').lower()
+        
+        if '主角' in role or 'protagonist' in role:
+            protagonist = char
+        elif '反派' in role or 'villain' in role or '大灰狼' in char_name or '狼' in char_name:
+            villain = char
+        elif '妈妈' in char_name or '奶奶' in char_name or '外婆' in char_name or '家人' in role:
+            family_members.append(char)
+        else:
+            supporting.append(char)
+    
+    # 如果没有识别出主角，尝试用名称匹配
+    if not protagonist:
+        for char in characters:
+            char_name = char.get('name', '')
+            if '小红帽' in char_name:
+                protagonist = char
+                break
+    
+    # ===== 定位逻辑 =====
+    
+    # 1. 找关键地点坐标
+    location_coords = {}
+    for loc in locations:
+        name = loc.get('name', '')
+        zone = loc.get('zone', '')
+        location_coords[name] = {'x': loc.get('x', 50), 'y': loc.get('y', 50)}
+        location_coords[zone] = {'x': loc.get('x', 50), 'y': loc.get('y', 50)}
+    
+    # 关键地点
+    hometown = None      # 小红帽家/起点
+    destination = None   # 奶奶家/终点
+    forest = None        # 森林/中间区域
+    village = None       # 村庄/广场
+    
+    for loc in locations:
+        name = loc.get('name', '')
+        zone = loc.get('zone', '')
+        if '小红帽家' in name or '小红帽家' in zone:
+            hometown = {'x': loc.get('x', 50), 'y': loc.get('y', 50), 'name': name or zone}
+        elif '奶奶家' in name or '外婆家' in name or '奶奶' in name:
+            destination = {'x': loc.get('x', 50), 'y': loc.get('y', 50), 'name': name or zone}
+        elif '森林' in name or '森林' in zone:
+            forest = {'x': loc.get('x', 50), 'y': loc.get('y', 50), 'name': name or zone}
+        elif '广场' in name or '村庄' in name or '村庄' in zone:
+            village = {'x': loc.get('x', 50), 'y': loc.get('y', 50), 'name': name or zone}
+    
+    # 如果没找到森林，用村庄代替
+    if not forest and village:
+        forest = village
+    
+    # 2. 分析故事中角色的出发地和目的地
+    # 检查故事开头：谁从哪里出发
+    story_start = text[:800]  # 取前800字符分析
+    
+    # 小红帽通常从家出发
+    # 奶奶住在远处
+    # 大灰狼在森林里游荡
+    
+    # 3. 分配位置
+    # 主角和家人（妈妈）：在家（小红帽家）
+    if protagonist:
+        char_name = protagonist.get('name', '')
+        if hometown:
+            positions[char_name] = hometown.copy()
+            logger.info(f"角色初始位置: {char_name} -> {hometown['name']} ({positions[char_name]['x']}, {positions[char_name]['y']})")
+        else:
+            positions[char_name] = {'x': 25, 'y': 30}  # 默认小红帽家位置
+            logger.info(f"角色初始位置: {char_name} -> 默认小红帽家位置 ({positions[char_name]['x']}, {positions[char_name]['y']})")
+    
+    # 妈妈和主角在一起
+    for char in family_members:
+        char_name = char.get('name', '')
+        if '小红帽' not in char_name and char_name not in positions:  # 不重复小红帽
+            if hometown:
+                positions[char_name] = hometown.copy()
+                logger.info(f"角色初始位置: {char_name} -> {hometown['name']} (与小红帽同住)")
+            else:
+                # 妈妈稍微偏移一点
+                positions[char_name] = {'x': 30, 'y': 35}
+                logger.info(f"角色初始位置: {char_name} -> 默认家位置")
+    
+    # 奶奶/外婆：在远处（奶奶家）
+    for char in family_members:
+        char_name = char.get('name', '')
+        if '奶奶' in char_name or '外婆' in char_name:
+            if destination:
+                positions[char_name] = destination.copy()
+                logger.info(f"角色初始位置: {char_name} -> {destination['name']} (森林深处)")
+            else:
+                positions[char_name] = {'x': 75, 'y': 70}  # 默认奶奶家位置
+                logger.info(f"角色初始位置: {char_name} -> 默认奶奶家位置")
+    
+    # 大灰狼：在中间位置（森林）
+    if villain:
+        char_name = villain.get('name', '')
+        if forest:
+            positions[char_name] = forest.copy()
+            logger.info(f"角色初始位置: {char_name} -> {forest['name']} (森林中)")
+        elif destination and hometown:
+            # 计算中间位置
+            mid_x = (destination['x'] + hometown['x']) // 2
+            mid_y = (destination['y'] + hometown['y']) // 2
+            positions[char_name] = {'x': mid_x, 'y': mid_y}
+            logger.info(f"角色初始位置: {char_name} -> 中间位置 ({mid_x}, {mid_y})")
+        else:
+            positions[char_name] = {'x': 60, 'y': 50}  # 默认森林位置
+            logger.info(f"角色初始位置: {char_name} -> 默认森林位置")
+    
+    # 配角：分散在不同位置
+    used_positions = set()
+    for pos in positions.values():
+        used_positions.add((pos['x'], pos['y']))
+    
+    for char in supporting:
+        char_name = char.get('name', '')
+        if char_name in positions:
+            continue
+        
+        # 找一个未使用的位置
+        assigned = False
+        for loc in locations:
+            x, y = loc.get('x', 50), loc.get('y', 50)
+            if (x, y) not in used_positions:
+                positions[char_name] = {'x': x, 'y': y}
+                logger.info(f"角色初始位置: {char_name} -> {loc.get('name', '未知')}")
+                used_positions.add((x, y))
+                assigned = True
+                break
+        
+        if not assigned:
+            # 随机分配一个边缘位置
+            import random
+            while True:
+                x = random.randint(10, 90)
+                y = random.randint(10, 90)
+                if (x, y) not in used_positions and abs(x - 50) > 20:
+                    positions[char_name] = {'x': x, 'y': y}
+                    logger.info(f"角色初始位置: {char_name} -> 随机边缘位置 ({x}, {y})")
+                    break
+    
+    return positions
 
 
 def generate_next_options(text: str, characters: List[Dict]) -> List[Dict[str, str]]:
@@ -2098,6 +2373,75 @@ def generate_all_image_prompts():
         }), 500
 
 
+# ==================== 地图分析 API ====================
+
+@app.route('/api/map/analyze', methods=['POST'])
+def analyze_map_locations():
+    """
+    使用AI分析故事文本，提取地点信息并生成地图数据
+    
+    请求体：
+    {
+        "text": "故事文本内容",
+        "scene_type": "场景类型（可选，默认'童话镇'）"
+    }
+    
+    响应：
+    {
+        "success": true,
+        "scene_type": "场景类型",
+        "center_zone": "中心区域名称",
+        "entry_zone": "入口区域名称",
+        "total_locations": 地点数量,
+        "locations": [
+            {
+                "name": "地点名称",
+                "description": "地点描述",
+                "importance": "high/medium/low",
+                "relations": ["相关地点列表"],
+                "x": 50,
+                "y": 50,
+                "zone": "区域名称"
+            }
+        ],
+        "map_size": {
+            "width": 100,
+            "height": 100,
+            "unit": "percentage"
+        }
+    }
+    """
+    try:
+        data = request.get_json() or {}
+        text = data.get('text', '')
+        scene_type = data.get('scene_type', '童话镇')
+        
+        if not text:
+            return jsonify({'success': False, 'error': '文本不能为空'}), 400
+        
+        if not analyze_story_locations:
+            return jsonify({'success': False, 'error': '地图分析模块未加载'}), 500
+        
+        # 获取AI提供者（用于AI分析）
+        provider = get_llm_provider()
+        
+        # 分析故事地点
+        map_data = analyze_story_locations(text, scene_type, provider)
+        
+        logger.info(f"地图分析完成: 场景={scene_type}, 地点数={map_data['total_locations']}")
+        
+        return jsonify({
+            'success': True,
+            **map_data
+        })
+    except Exception as e:
+        logger.error(f"地图分析失败: {e}")
+        return jsonify({
+            'success': False,
+            'error': f'分析失败: {str(e)}'
+        }), 500
+
+
 # ==================== 错误处理 ====================
 @app.errorhandler(404)
 def not_found(e):
@@ -2108,145 +2452,6 @@ def not_found(e):
 def server_error(e):
     return jsonify({'success': False, 'error': '服务器内部错误'}), 500
 
-
-# ==================== 自动故事演绎 API ====================
-@app.route('/api/story/auto-play', methods=['POST'])
-def auto_play_story():
-    """
-    自动演绎完整故事，返回每段的表演序列。
-    请求体: {"story": "完整故事文本", "session_id": "可选"}
-    响应: 每段的 performance_sequence 和 world_state_update。
-    """
-    data = request.get_json() or {}
-    full_story = data.get('story', '')
-    session_id = data.get('session_id')
-
-    if not full_story:
-        return jsonify({'success': False, 'error': '故事文本不能为空'}), 400
-
-    logger.info(f"开始自动演绎故事，长度 {len(full_story)} 字符")
-
-    # 1. 提取地点和初始位置
-    try:
-        extracted = extract_locations_and_initial_positions(full_story)
-        all_locations = extracted.get('locations', [])
-        initial_positions = extracted.get('initial_positions', {})
-    except Exception as e:
-        logger.error(f"提取位置失败: {e}")
-        return jsonify({'success': False, 'error': f'位置提取失败: {str(e)}'}), 500
-
-    # 2. 分段
-    episodes = split_into_episodes(full_story, num_episodes=5)
-    if not episodes:
-        return jsonify({'success': False, 'error': '故事分段失败'}), 500
-
-    logger.info(f"故事分为 {len(episodes)} 段")
-
-    # 3. 获取或初始化 GameState
-    gs = get_game_state()
-    if not gs:
-        return jsonify({'success': False, 'error': '游戏状态未初始化'}), 500
-
-    # 重置游戏状态（可选，避免之前的角色干扰）
-    gs.reset()
-
-    # 根据初始位置设置角色列表
-    if initial_positions:
-        gs.characters = [
-            {
-                'name': name,
-                'persona': '',
-                'goal': '',
-                'position': {'location': loc},  # 存储地点名
-                'emotion': 'neutral'
-            }
-            for name, loc in initial_positions.items()
-        ]
-    else:
-        # 如果没有提取到初始位置，使用空角色列表（后续会从第一段自动识别）
-        gs.characters = []
-
-    # 4. 获取导演实例（如果已有则复用，否则创建）
-    director = get_plot_director()
-    if not director:
-        return jsonify({'success': False, 'error': '剧情导演未初始化'}), 500
-
-    # 5. 准备结果存储
-    results = []
-    character_names = [c['name'] for c in gs.characters]
-
-    # 6. 逐段处理
-    for idx, ep_text in enumerate(episodes):
-        logger.info(f"处理第 {idx + 1}/{len(episodes)} 段: {ep_text[:50]}...")
-
-        # 获取当前所有角色的位置（地点名格式）
-        current_positions = {}
-        for char in gs.characters:
-            name = char['name']
-            loc = char.get('position', {}).get('location', '未知')
-            current_positions[name] = loc
-
-        # 调用 story_parser 生成该段的动作序列（传入当前位置）
-        try:
-            episode_output = generate_actions_for_episode(
-                episode_text=ep_text,
-                current_positions=current_positions,
-                all_locations=all_locations,
-                character_names=character_names
-            )
-        except Exception as e:
-            logger.error(f"生成动作失败: {e}")
-            # 如果失败，使用规则提取作为兜底
-            episode_output = {"narrative": ep_text, "actions": []}
-
-        narrative = episode_output.get("narrative", ep_text)
-        actions = episode_output.get("actions", [])
-
-        # 使用导演处理这一回合
-        try:
-            # 生成后续选项（可以简单生成默认）
-            next_options = generate_next_options(ep_text, gs.characters)
-            # 检测场景（简单提取第一个地点名）
-            scene = detect_scene_from_text(ep_text)
-
-            director_response = director.direct_turn(
-                raw_actions=actions,
-                narrative=narrative,
-                next_options=next_options
-            )
-
-            # 记录结果
-            results.append({
-                "episode_index": idx,
-                "episode_text": ep_text,
-                "performance_sequence": director_response.get("performance_sequence", []),
-                "world_state_update": director_response.get("world_state_update", {}),
-                "narrative": narrative,
-                "actions": actions
-            })
-
-            # 重要：更新 GameState 中的角色位置（direct_turn 内部已通过 StateUpdater 更新了 gs.characters）
-            # 所以无需额外操作，但需要把当前角色列表同步到 character_names
-            character_names = [c['name'] for c in gs.characters]
-
-        except Exception as e:
-            logger.error(f"导演处理第 {idx + 1} 段失败: {e}")
-            # 返回失败的结果，但继续下一段？这里选择终止
-            return jsonify({'success': False, 'error': f'第{idx + 1}段处理失败: {str(e)}'}), 500
-
-        # 可选：记录到记忆系统
-        ms = get_memory_store()
-        if ms and session_id:
-            ms.add_turn(session_id, ep_text, narrative)
-
-    logger.info(f"自动演绎完成，共 {len(results)} 段")
-
-    return jsonify({
-        'success': True,
-        'session_id': session_id,
-        'episodes': results,
-        'total_episodes': len(results)
-    })
 
 # ==================== 启动配置 ====================
 if __name__ == '__main__':

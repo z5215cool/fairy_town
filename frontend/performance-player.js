@@ -378,16 +378,6 @@ class PerformancePlayer {
         }
         
         console.log(`PerformancePlayer: ${step.character} movement completed`);
-        
-        // 同步更新 system.characters 中的位置数据
-        if (this.system && this.system.characters) {
-            const character = this.system.characters.find(c => c.name === step.character);
-            if (character) {
-                character.position.x = targetPosition.x;
-                character.position.y = targetPosition.y;
-                console.log(`PerformancePlayer: 同步更新 ${step.character} 的位置到 system.characters: (${targetPosition.x}, ${targetPosition.y})`);
-            }
-        }
     }
 
     /**
@@ -433,9 +423,6 @@ class PerformancePlayer {
                 
                 element.style.left = `${currentX}%`;
                 element.style.top = `${currentY}%`;
-                
-                // 同步更新对话气泡位置
-                this._updateDialogueBubblePosition(element);
                 
                 if (progress < 1) {
                     animationFrameId = requestAnimationFrame(animate);
@@ -575,39 +562,6 @@ class PerformancePlayer {
     }
 
     /**
-     * 更新对话气泡位置，使其跟随角色移动
-     * @param {HTMLElement} characterElement 角色元素
-     */
-    _updateDialogueBubblePosition(characterElement) {
-        // 获取角色名称
-        const characterName = characterElement.getAttribute('data-character') || 
-                             characterElement.querySelector('.character-name-tag')?.textContent;
-        
-        if (!characterName) {
-            return;
-        }
-        
-        // 查找该角色的对话气泡
-        const bubblesContainer = document.getElementById('dialogue-bubbles');
-        if (!bubblesContainer) {
-            return;
-        }
-        
-        const bubble = bubblesContainer.querySelector(`[data-speaker="${characterName}"]`);
-        if (!bubble) {
-            return;
-        }
-        
-        // 获取角色当前位置
-        const currentX = parseFloat(characterElement.style.left) || 50;
-        const currentY = parseFloat(characterElement.style.top) || 50;
-        
-        // 更新气泡位置（角色正上方）
-        bubble.style.left = `${currentX}%`;
-        bubble.style.top = `${currentY - 15}%`;
-    }
-
-    /**
      * 显示对话
      */
     async _displayDialogue(step) {
@@ -623,10 +577,23 @@ class PerformancePlayer {
             existingBubble.remove();
         }
 
+        // 获取说话者的初始位置
+        let leftPos = '50%';
+        let topPos = '30%';
+        
+        if (this.system && this.system.characters) {
+            const character = this.system.characters.find(c => c.name === step.speaker);
+            if (character && character.position) {
+                leftPos = `${character.position.x}%`;
+                topPos = `${character.position.y - 15}%`;
+            }
+        }
+
         // 创建新的气泡元素
         const bubble = document.createElement('div');
         bubble.className = `dialogue-bubble emotion-${step.emotion}`;
         bubble.dataset.speaker = step.speaker;
+        bubble.dataset.characterName = step.speaker;
         
         // 创建说话者标签和内容
         const speakerElement = document.createElement('div');
@@ -640,18 +607,7 @@ class PerformancePlayer {
         bubble.appendChild(speakerElement);
         bubble.appendChild(contentElement);
 
-        // 设置气泡位置
-        let leftPos = '50%';
-        let topPos = '30%';
-        
-        if (this.system && this.system.characters) {
-            const character = this.system.characters.find(c => c.name === step.speaker);
-            if (character && character.position) {
-                leftPos = `${character.position.x}%`;
-                topPos = `${character.position.y - 15}%`;
-            }
-        }
-        
+        // 设置气泡初始位置
         bubble.style.left = leftPos;
         bubble.style.top = topPos;
         bubble.style.position = 'absolute';
@@ -666,6 +622,32 @@ class PerformancePlayer {
             opacity: 1, 
             transform: 'translateY(0)' 
         }, 300);
+
+        // 开始跟随人物移动的动画循环
+        const moveBubbleWithCharacter = () => {
+            if (!this.isPlaying || this.isPaused) {
+                return;
+            }
+
+            const character = this.system && this.system.characters 
+                ? this.system.characters.find(c => c.name === step.speaker)
+                : null;
+            
+            if (character && character.position) {
+                const targetLeft = `${character.position.x}%`;
+                const targetTop = `${character.position.y - 15}%`;
+                
+                bubble.style.left = targetLeft;
+                bubble.style.top = targetTop;
+            }
+
+            if (this.isPlaying && !this.isPaused) {
+                requestAnimationFrame(moveBubbleWithCharacter);
+            }
+        };
+
+        // 启动跟随动画循环
+        moveBubbleWithCharacter();
 
         // 等待对话显示时间（可被暂停中断）
         await this._waitWithPause(step.duration - 300);
