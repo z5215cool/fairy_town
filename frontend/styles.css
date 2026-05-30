@@ -737,38 +737,8 @@ body {
 }
 
 .btn-icon.btn-close {
-    position: relative;
-    width: 36px;
-    height: 36px;
-    padding: 0;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.08);
+    background: transparent;
     color: white;
-}
-
-.btn-icon.btn-close::before,
-.btn-icon.btn-close::after {
-    content: "";
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    width: 16px;
-    height: 2px;
-    background: currentColor;
-    border-radius: 1px;
-    transform-origin: center;
-}
-
-.btn-icon.btn-close::before {
-    transform: translate(-50%, -50%) rotate(45deg);
-}
-
-.btn-icon.btn-close::after {
-    transform: translate(-50%, -50%) rotate(-45deg);
-}
-
-.btn-icon.btn-close .icon {
-    display: none;
 }
 
 .btn-icon.btn-close:hover {

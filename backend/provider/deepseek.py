@@ -1,8 +1,8 @@
 import os
 import requests
 from .base import Provider, build_messages
+from config.settings import config
 
-_API_URL = "https://api.deepseek.com/v1/chat/completions"
 _PRICE_IN  = 0.14 / 1_000_000   # $0.14 / 1M input tokens  (deepseek-chat)
 _PRICE_OUT = 0.28 / 1_000_000   # $0.28 / 1M output tokens
 
@@ -12,21 +12,31 @@ class DeepSeekProvider(Provider):
     def name(self) -> str:
         return "deepseek"
 
-    def __init__(self, api_key: str | None = None, default_model: str = "deepseek-chat"):
-        self._api_key = api_key or os.environ["API-KEY"]
-        self._default_model = default_model
+    def __init__(self, api_key: str | None = None, default_model: str = None):
+        self._api_key = api_key or os.environ.get("DEEPSEEK_API_KEY", "")
+        self._default_model = default_model or config.get("DEEPSEEK_MODEL", "deepseek-chat")
+        self._api_base_url = config.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1")
 
     def _call(self, prompt: str, history: list[str], params: dict) -> dict:
+        model = params.get("model", self._default_model)
+        messages = build_messages(history, prompt)
+        
         payload = {
-            "model": params.get("model", self._default_model),
-            "messages": build_messages(history, prompt),
+            "model": model,
+            "messages": messages,
             "max_tokens": params.get("max_tokens", 1024),
             "temperature": params.get("temperature", 0.7),
         }
+        
+        api_url = f"{self._api_base_url.rstrip('/')}/chat/completions"
+        
         resp = requests.post(
-            _API_URL,
+            api_url,
             json=payload,
-            headers={"Authorization": f"Bearer {self._api_key}"},
+            headers={
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type": "application/json"
+            },
             timeout=60,
         )
         resp.raise_for_status()
