@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from typing import List, Dict, Any, Optional
 from .game_state import GameState
-
+from .story_parser import split_into_episodes, extract_locations_and_initial_positions, generate_actions_for_episode
 logger = logging.getLogger(__name__)
 
 
@@ -244,126 +244,6 @@ class PlotDirector:
         self.validator = ActionValidator(game_state)
         self.updater = StateUpdater(game_state)
         self.turn_counter = 0
-        self.map_locations = []  # 存储地图位置数据 [{name, x, y, ...}, ...]
-        self.character_initial_positions = {}  # 存储角色初始位置 {character_name: {x, y}}
-    
-    def set_map_locations(self, locations: List[Dict[str, Any]], character_initial_positions: Dict[str, Dict[str, int]] = None):
-        """
-        设置地图位置数据
-        
-        参数：
-        - locations: 地图地点列表
-        - character_initial_positions: 角色初始位置字典 {角色名: {x, y}}
-        """
-        self.map_locations = locations
-        self.character_initial_positions = character_initial_positions or {}
-        logger.info(f"导演已设置地图数据: {len(locations)}个地点, {len(self.character_initial_positions)}个角色初始位置")
-    
-    def _find_location_position(self, target: str) -> Optional[Dict[str, int]]:
-        """
-        根据地点名称查找坐标
-        
-        参数：
-        - target: 地点描述（如"奶奶家"、"森林"等）
-        
-        返回：
-        - 坐标字典 {x, y} 或 None
-        """
-        if not target:
-            return None
-        
-        target_lower = target.lower()
-        
-        # 0. 地点名称同义词映射
-        location_aliases = {
-            '小红帽家': ['小红帽家', '小红帽的住所', '小红帽的房子', '主角家', '主角的家'],
-            '奶奶家': ['奶奶家', '奶奶', '外婆家', '外婆', '祖母', '奶奶的住所', '外婆的住所'],
-            '森林': ['森林', '森林入口', '树林', '大森林', '森林深处'],
-            '村庄': ['村庄', '村子', '村庄广场', '广场'],
-        }
-        
-        # 检查是否为目标的关键字匹配同义词
-        for standard_name, aliases in location_aliases.items():
-            if target_lower in [a.lower() for a in aliases] or any(a.lower() in target_lower for a in aliases):
-                # 用标准名称去匹配
-                for loc in self.map_locations:
-                    loc_name = loc.get('name', '').lower()
-                    loc_zone = loc.get('zone', '').lower()
-                    if standard_name.lower() == loc_name or standard_name.lower() == loc_zone or loc_name == standard_name.lower():
-                        return {'x': loc.get('x', 50), 'y': loc.get('y', 50)}
-        
-        # 1. 精确匹配地点名称
-        for loc in self.map_locations:
-            loc_name = loc.get('name', '').lower()
-            loc_zone = loc.get('zone', '').lower()
-            if loc_name == target_lower or loc_zone == target_lower:
-                return {'x': loc.get('x', 50), 'y': loc.get('y', 50)}
-        
-        # 2. 模糊匹配（地点名包含目标）
-        for loc in self.map_locations:
-            loc_name = loc.get('name', '').lower()
-            loc_zone = loc.get('zone', '').lower()
-            if target_lower in loc_name or loc_name in target_lower:
-                return {'x': loc.get('x', 50), 'y': loc.get('y', 50)}
-            if target_lower in loc_zone or loc_zone in target_lower:
-                return {'x': loc.get('x', 50), 'y': loc.get('y', 50)}
-        
-        # 3. 常见地点名称映射
-        common_mappings = {
-            '家': ['小红帽家', '奶奶家', '主角家'],
-            '森林': ['森林入口', '森林深处'],
-            '村庄': ['村庄入口', '村庄广场'],
-            '小红帽家': ['小红帽家'],
-            '奶奶家': ['奶奶家'],
-        }
-        
-        for key, names in common_mappings.items():
-            if key in target:
-                for name in names:
-                    for loc in self.map_locations:
-                        if loc.get('name') == name or loc.get('zone') == name:
-                            return {'x': loc.get('x', 50), 'y': loc.get('y', 50)}
-        
-        # 4. 最后尝试：直接检查原始target是否包含"奶奶"或"小红帽"等关键词
-        if '奶奶' in target:
-            for loc in self.map_locations:
-                loc_name = loc.get('name', '')
-                if '奶奶' in loc_name or '外婆' in loc_name:
-                    return {'x': loc.get('x', 50), 'y': loc.get('y', 50)}
-        if '小红帽' in target:
-            for loc in self.map_locations:
-                loc_name = loc.get('name', '')
-                if '小红帽' in loc_name:
-                    return {'x': loc.get('x', 50), 'y': loc.get('y', 50)}
-        
-        return None
-    
-    def get_character_initial_position(self, character_name: str) -> Dict[str, int]:
-        """
-        获取角色的初始位置
-        
-        参数：
-        - character_name: 角色名称
-        
-        返回：
-        - 坐标字典 {x, y}
-        """
-        # 优先使用预设的初始位置
-        if character_name in self.character_initial_positions:
-            return self.character_initial_positions[character_name]
-        
-        # 如果没有预设，查找角色相关地点
-        for loc in self.map_locations:
-            name = loc.get('name', '')
-            zone = loc.get('zone', '')
-            # 小红帽默认在小红帽家，奶奶默认在奶奶家
-            if '小红帽' in character_name and ('小红帽家' in name or '小红帽' in zone):
-                return {'x': loc.get('x', 50), 'y': loc.get('y', 50)}
-            if '奶奶' in character_name and ('奶奶家' in name or '奶奶' in zone):
-                return {'x': loc.get('x', 50), 'y': loc.get('y', 50)}
-        
-        # 默认返回中心位置
-        return {'x': 50, 'y': 50}
     
     def direct_turn(
         self,
@@ -422,7 +302,73 @@ class PlotDirector:
         
         logger.info(f"第 {self.turn_counter} 回合导演完成，生成 {len(performance_sequence)} 个表演步骤")
         return response
-    
+
+
+
+    def run_auto_story(self, full_story: str) -> List[Dict]:
+        """
+        自动演绎完整故事，返回每段的表演序列列表。
+        """
+        # 1. 提取地点和初始位置
+        extracted = extract_locations_and_initial_positions(full_story)
+        all_locations = extracted.get("locations", [])
+        initial_positions = extracted.get("initial_positions", {})
+
+        # 2. 确保 game_state.characters 已填充位置信息
+        #    如果 characters 为空，则根据 initial_positions 创建角色列表
+        if not self.game_state.characters:
+            self.game_state.characters = [
+                {"name": name, "position": {"location": loc}, "emotion": "neutral"}
+                for name, loc in initial_positions.items()
+            ]
+        else:
+            # 更新现有角色的位置
+            for char in self.game_state.characters:
+                name = char.get("name")
+                if name in initial_positions:
+                    char["position"] = {"location": initial_positions[name]}
+        # 3. 分段
+        episodes = split_into_episodes(full_story, num_episodes=5)
+
+        results = []
+        character_names = [c["name"] for c in self.game_state.characters]
+
+        # 4. 逐段执行
+        for idx, ep_text in enumerate(episodes):
+            # 获取当前所有角色的位置（地点名格式）
+            current_positions = {}
+            for char in self.game_state.characters:
+                name = char["name"]
+                loc = char.get("position", {}).get("location", "未知")
+                current_positions[name] = loc
+
+            # 调用大模型生成本段动作
+            episode_output = generate_actions_for_episode(
+                episode_text=ep_text,
+                current_positions=current_positions,
+                all_locations=all_locations,
+                character_names=character_names
+            )
+
+            narrative = episode_output.get("narrative", "")
+            actions = episode_output.get("actions", [])
+
+            # 使用现有的 direct_turn 执行动作序列
+            turn_result = self.direct_turn(
+                raw_actions=actions,
+                narrative=narrative,
+                next_options=None
+            )
+
+            results.append({
+                "episode_index": idx,
+                "episode_text": ep_text,
+                "performance_sequence": turn_result["performance_sequence"],
+                "world_state_update": turn_result["world_state_update"]
+            })
+
+        return results
+
     def _validate_and_filter_actions(
         self, 
         actions: List[Dict[str, Any]]
@@ -512,24 +458,8 @@ class PlotDirector:
                 target = action.get('target', '')
                 position = action.get('position', {})
                 
-                # 优先使用地图位置数据
-                map_position = self._find_location_position(target)
-                if map_position:
-                    position = map_position
-                    logger.info(f"使用地图位置: {character} -> {target} = ({position['x']}, {position['y']})")
-                
                 # 移动动画通常需要时间
                 move_duration = self._calculate_move_duration(action)
-                
-                # 如果有地图数据，根据移动距离调整时间
-                if map_position and self.map_locations:
-                    # 计算从当前位置到目标位置的距离
-                    current_pos = self.game_state.get_character_position(character) if hasattr(self.game_state, 'get_character_position') else None
-                    if current_pos:
-                        distance = ((map_position['x'] - current_pos['x'])**2 + (map_position['y'] - current_pos['y'])**2)**0.5
-                        # 根据距离调整动画时间（距离越远时间越长）
-                        distance_factor = max(0.5, min(2.0, distance / 50))
-                        move_duration = int(move_duration * distance_factor)
                 
                 sequence.append({
                     'step_id': len(sequence) + 1,
@@ -559,25 +489,6 @@ class PlotDirector:
                     'emotion': emotion,
                     'duration': text_duration,
                     'target_element': 'dialogue-bubble'
-                })
-            
-            elif action_type == 'meet':
-                # 处理相遇事件
-                characters = action.get('characters', [])
-                content = action.get('content', '')
-                
-                # 如果没有content，自动生成
-                if not content and len(characters) >= 2:
-                    content = f"{characters[0]}与{characters[1]}相遇了"
-                elif not content and len(characters) == 1:
-                    content = f"{characters[0]}遇到了某人"
-                
-                sequence.append({
-                    'step_id': len(sequence) + 1,
-                    'type': 'narrative_display',
-                    'content': content,
-                    'duration': 2500,
-                    'target_element': 'narrative-panel'
                 })
             
             else:
@@ -618,71 +529,15 @@ class PlotDirector:
         return sequence
     
     def _calculate_move_duration(self, action: Dict[str, Any]) -> int:
-        """
-        计算移动动作的持续时间（毫秒）
-        根据距离和故事情节（动作描述中的情感/速度词汇）综合计算
-        """
+        """计算移动动作的持续时间（毫秒）"""
+        # 简单实现：基于目标描述的复杂度
         target = action.get('target', '')
-        content = action.get('content', '')  # 获取动作描述
-        emotion = action.get('emotion', '')  # 获取情绪状态
-
-        # 基础时间（毫秒）- 进一步调慢速度
-        base_duration = 5000
-
-        # 基于距离调整
-        distance_multiplier = 1.0
-        if any(word in target for word in ['深处', '远处', '远方', '遥远的']):
-            distance_multiplier = 1.8  # 较远距离
-        elif any(word in target for word in ['附近', '旁边', '近处', '面前']):
-            distance_multiplier = 0.7  # 较近距离
-        elif any(word in target for word in ['角落', '边缘']):
-            distance_multiplier = 0.85  # 短距离
-
-        # 基于速度/情感词汇调整
-        speed_multiplier = 1.0
-
-        # 快速、匆忙的词汇 - 加快速度
-        if any(word in content.lower() + emotion.lower() for word in
-               ['快速', '飞快', '匆忙', '急匆匆', '跑', '奔', '冲', '疾速', '迅速',
-                'hurried', 'quickly', 'fast', 'rush', 'dash', 'hurry', 'rapid']):
-            speed_multiplier = 0.6  # 快速移动
-
-        # 缓慢、从容的词汇 - 减慢速度
-        elif any(word in content.lower() + emotion.lower() for word in
-                 ['缓慢', '慢慢', '悠闲', '从容', '漫步', '踱步', '散步', '悠闲地',
-                  '慢悠悠', '悠闲地', '缓步', '徐徐',
-                  'slowly', 'slow', 'leisurely', 'calmly', 'stroll', 'walk']):
-            speed_multiplier = 2.5  # 慢速移动，时间加倍
-
-        # 紧张、激烈的词汇
-        elif any(word in content.lower() + emotion.lower() for word in
-                 ['紧张', '焦急', '焦虑', '害怕', '恐惧', '慌张',
-                  'nervous', 'anxious', 'afraid', 'scared', 'panic', 'nervously']):
-            speed_multiplier = 0.8  # 紧张状态下稍快
-
-        # 沉重、沉重的步伐
-        elif any(word in content.lower() + emotion.lower() for word in
-                 ['沉重', '沉重地', '蹒跚', '踉跄', '疲惫',
-                  'heavy', 'heavily', 'stumble', 'tired', 'exhausted']):
-            speed_multiplier = 2.2  # 沉重缓慢
-
-        # 悲伤、沮丧的词汇
-        elif any(word in content.lower() + emotion.lower() for word in
-                 ['悲伤', '沮丧', '失落', '拖着脚步', '垂头丧气',
-                  'sad', 'depressed', 'downhearted', 'disheartened']):
-            speed_multiplier = 2.0  # 悲伤时走得慢
-
-        # 神秘、悄悄的词汇
-        elif any(word in content.lower() + emotion.lower() for word in
-                 ['悄悄', '偷偷', '静悄悄', '神秘', '蹑手蹑脚',
-                  'quietly', 'secretly', 'sneak', 'mysterious', 'tiptoe']):
-            speed_multiplier = 1.5  # 悄悄移动，稍慢
-
-        # 计算最终时间
-        final_duration = base_duration * distance_multiplier * speed_multiplier
-
-        # 限制范围在 2000ms - 10000ms 之间
-        return int(max(2000, min(10000, final_duration)))
+        if any(word in target for word in ['深处', '远处', '远方']):
+            return 3000  # 较远距离
+        elif any(word in target for word in ['附近', '旁边']):
+            return 1500  # 较近距离
+        else:
+            return 2000  # 默认距离
     
     def _extract_character_action(
         self, 

@@ -323,22 +323,15 @@ body {
 
 .dialogue-bubble {
     position: absolute;
-    max-width: 300px;
-    min-width: 100px;
+    max-width: 200px;
     background: white;
-    padding: 10px 14px;
-    border-radius: 16px;
+    padding: 12px 16px;
+    border-radius: 20px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     animation: fadeInUp 0.3s ease;
     pointer-events: auto;
-    transform: translate(-50%, calc(-100% - 90px));
-    z-index: 1000;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    word-wrap: break-word;
-    overflow-wrap: break-word;
-    white-space: normal;
+    transform: translate(-20%, -110%); /* 调整位置，使其显示在角色上方 */
+    z-index: 100;
 }
 
 @keyframes fadeInUp {
@@ -356,42 +349,10 @@ body {
     content: '';
     position: absolute;
     bottom: -8px;
-    left: 50%;
-    transform: translateX(-50%);
+    left: 20px;
     border-width: 8px 8px 0;
     border-style: solid;
     border-color: white transparent transparent transparent;
-}
-
-.bubble-speaker {
-    font-weight: bold;
-    font-size: 0.85rem;
-    color: #333;
-    margin-bottom: 4px;
-}
-
-.bubble-content {
-    font-size: 0.9rem;
-    color: #555;
-    line-height: 1.4;
-    word-wrap: break-word;
-}
-
-/* 不同情绪的对话气泡颜色 */
-.dialogue-bubble.emotion-happy {
-    background: #fff9e6;
-}
-
-.dialogue-bubble.emotion-sad {
-    background: #e6f0ff;
-}
-
-.dialogue-bubble.emotion-angry {
-    background: #ffe6e6;
-}
-
-.dialogue-bubble.emotion-neutral {
-    background: white;
 }
 
 /* 文本输入面板 */
@@ -776,38 +737,8 @@ body {
 }
 
 .btn-icon.btn-close {
-    position: relative;
-    width: 36px;
-    height: 36px;
-    padding: 0;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.08);
+    background: transparent;
     color: white;
-}
-
-.btn-icon.btn-close::before,
-.btn-icon.btn-close::after {
-    content: "";
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    width: 16px;
-    height: 2px;
-    background: currentColor;
-    border-radius: 1px;
-    transform-origin: center;
-}
-
-.btn-icon.btn-close::before {
-    transform: translate(-50%, -50%) rotate(45deg);
-}
-
-.btn-icon.btn-close::after {
-    transform: translate(-50%, -50%) rotate(-45deg);
-}
-
-.btn-icon.btn-close .icon {
-    display: none;
 }
 
 .btn-icon.btn-close:hover {

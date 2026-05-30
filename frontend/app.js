@@ -79,12 +79,10 @@ class FairyTownSystem {
         this.loadSettings();
         this.setupEventListeners();
         this.movementController = new MovementController(this);
-        // 初始化表演执行器（如果可用）
-        if (typeof PerformancePlayer !== 'undefined') {
-            this.performancePlayer = new PerformancePlayer(this);
-        }
-        // 加载示例角色
-        this.loadSampleCharacters();
+        // 初始化表演执行器
+        this.performancePlayer = new PerformancePlayer(this);
+        // 初始时不加载角色，等用户输入故事后分析生成
+        // this.loadSampleCharacters();
         this.updateSystemStatus();
         this.startAutoSave();
     }
@@ -2219,11 +2217,10 @@ class MovementController {
             const startY = character.position.y;
             const distance = Math.sqrt(Math.pow(targetClampedX - startX, 2) + Math.pow(targetClampedY - startY, 2));
             const duration = (distance / speed) * 100;
-            const startTime = performance.now ? performance.now() : Date.now();
+            const startTime = Date.now();
 
             const animate = () => {
-                const now = performance.now ? performance.now() : Date.now();
-                const elapsed = now - startTime;
+                const elapsed = Date.now() - startTime;
                 const progress = Math.min(elapsed / duration, 1);
 
                 character.position.x = startX + (targetClampedX - startX) * progress;
