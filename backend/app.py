@@ -2098,6 +2098,81 @@ def generate_all_image_prompts():
         }), 500
 
 
+@app.route('/api/continue-story', methods=['POST'])
+def continue_story():
+    """故事续写：根据当前文本续写故事"""
+    data = request.get_json() or {}
+    text = data.get('text', '')
+
+    logger.info(f"收到续写请求，文本长度: {len(text)}")
+
+    if not text:
+        return jsonify({'success': False, 'error': '文本不能为空'}), 400
+
+    provider = get_llm_provider()
+
+    if not provider:
+        return jsonify({
+            'success': False,
+            'error': 'AI提供者未配置，无法续写故事'
+        }), 500
+
+    prompt = f"""请根据以下故事内容，继续续写故事。
+
+要求：
+1. 保持原有故事的风格和语气
+2. 续写内容要自然流畅，与原文衔接
+3. 续写长度适中（约200-400字）
+4. 只输出续写的内容，不要包含原文
+5. 不要添加任何解释或说明
+
+原文：
+{text}
+
+续写内容："""
+
+    try:
+        logger.info("开始AI故事续写...")
+        result = provider.run(
+            prompt=prompt,
+            history=[],
+            params={'temperature': 0.8, 'max_tokens': 1000}
+        )
+
+        if not result.get('success'):
+            logger.warning("AI故事续写失败")
+            return jsonify({
+                'success': False,
+                'error': 'AI续写失败'
+            }), 500
+
+        continued_text = result['text'].strip()
+        
+        if not continued_text:
+            return jsonify({
+                'success': False,
+                'error': 'AI返回的续写内容为空'
+            }), 500
+
+        full_story = text + '\n\n' + continued_text
+
+        logger.info(f"故事续写成功，续写长度: {len(continued_text)}")
+
+        return jsonify({
+            'success': True,
+            'original_text': text,
+            'continued_text': continued_text,
+            'full_story': full_story
+        })
+
+    except Exception as e:
+        logger.error(f"故事续写异常: {e}")
+        return jsonify({
+            'success': False,
+            'error': f'续写失败: {str(e)}'
+        }), 500
+
+
 # ==================== 错误处理 ====================
 @app.errorhandler(404)
 def not_found(e):

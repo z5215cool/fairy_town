@@ -1074,7 +1074,7 @@ body {
 
 .icon-castle::before { content: "🏰"; }
 .icon-plus::before { content: "+"; font-weight: bold; }
-.icon-cog::before { content: "⚙️"; }
+.icon-cog::before { content: "️"; }
 .icon-users::before { content: "👥"; }
 .icon-sync-alt::before { content: "🔄"; }
 .icon-home::before { content: "🏠"; }
@@ -1084,6 +1084,18 @@ body {
 .icon-info-circle::before { content: "ℹ️"; }
 .icon-circle::before { content: "●"; }
 .icon-user-circle::before { content: "👤"; }
+.icon-book::before { content: ""; }
+.icon-magic::before { content: "✨"; }
+.icon-file-alt::before { content: "📄"; }
+.icon-pen::before { content: "✏️"; }
+.icon-crystal-ball::before { content: ""; }
+.icon-times::before { content: "✕"; }
+.icon-lightbulb::before { content: "💡"; }
+.icon-paper-plane::before { content: "📤"; }
+.icon-question-circle::before { content: "❓"; }
+.icon-wallet::before { content: "💰"; }
+.icon-pause::before { content: "⏸️"; }
+.icon-play::before { content: "▶️"; }
 
 .status-online {
     color: var(--success-color);

@@ -126,6 +126,11 @@ class FairyTownSystem {
             this.loadSampleStory();
         });
 
+        // 故事续写按钮
+        document.getElementById('continue-story').addEventListener('click', () => {
+            this.continueStory();
+        });
+
         // 生成预测按钮
         document.getElementById('generate-prediction').addEventListener('click', () => {
             this.generatePlotPrediction();
@@ -1210,6 +1215,41 @@ class FairyTownSystem {
 
         document.getElementById('story-input').value = sampleStory;
         this.showSystemMessage('示例故事已加载');
+    }
+
+    // 故事续写
+    continueStory() {
+        const text = document.getElementById('story-input').value.trim();
+
+        if (!text) {
+            this.showNotification('请先输入故事内容', 'warning');
+            return;
+        }
+
+        this.showSystemMessage('正在续写故事...');
+
+        fetch('http://localhost:5000/api/continue-story', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                text: text
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                document.getElementById('story-input').value = data.full_story;
+                this.showSystemMessage('故事续写完成');
+            } else {
+                this.showNotification(data.error || '故事续写失败', 'error');
+            }
+        })
+        .catch(error => {
+            console.error('Continue story error:', error);
+            this.showNotification('后端连接失败', 'error');
+        });
     }
 
     // 创建新故事
