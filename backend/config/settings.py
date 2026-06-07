@@ -26,8 +26,9 @@ class Config:
         if self._initialized:
             return
 
-        # 加载 .env 文件
-        env_path = Path(__file__).parent / '.env'
+        # 加载 .env 文件 - 从 backend 目录加载
+        backend_dir = Path(__file__).parent.parent  # config 目录的父目录就是 backend
+        env_path = backend_dir / '.env'
         if env_path.exists():
             load_dotenv(env_path)
         else:
@@ -48,6 +49,17 @@ class Config:
             'https://api.deepseek.com/v1'
         )
         self._config['DEEPSEEK_MODEL'] = os.getenv('DEEPSEEK_MODEL', 'deepseek-chat')
+
+        # ========== 豆包 API 配置 ==========
+        self._config['ARK_API_KEY'] = os.getenv('ARK_API_KEY', '')
+        self._config['DOUBAO_IMAGE_URL'] = os.getenv(
+            'DOUBAO_IMAGE_URL',
+            'https://ark.cn-beijing.volces.com/api/v3/images/generations'
+        )
+        self._config['DOUBAO_IMAGE_MODEL'] = os.getenv(
+            'DOUBAO_IMAGE_MODEL',
+            'doubao-seedream-4-5-251128'
+        )
 
         # ========== 系统配置 ==========
         self._config['DEBUG'] = os.getenv('DEBUG', 'false').lower() in ('true', '1', 'yes')
@@ -111,6 +123,8 @@ class Config:
         safe_config = self._config.copy()
         if 'DEEPSEEK_API_KEY' in safe_config:
             safe_config['DEEPSEEK_API_KEY'] = '***HIDDEN***'
+        if 'DOUBAO_API_KEY' in safe_config:
+            safe_config['DOUBAO_API_KEY'] = '***HIDDEN***'
         return safe_config
 
     def validate(self) -> tuple[bool, list[str]]:
@@ -122,19 +136,12 @@ class Config:
         """
         errors = []
 
-        # 必要配置检查
-        required_keys = ['DEEPSEEK_API_KEY']
-        for key in required_keys:
-            value = self.get(key)
-            if not value or value == '':
-                errors.append(f"Missing required config: {key}")
-
-        # 数值范围检查
-        if self.DEFAULT_MEMORY_LEN < 1:
-            errors.append("DEFAULT_MEMORY_LEN must be >= 1")
-
-        if self.REQUEST_TIMEOUT < 1:
-            errors.append("REQUEST_TIMEOUT must be >= 1")
+        # 必要配置检查（至少需要一个API密钥）
+        deepseek_key = self.get('DEEPSEEK_API_KEY')
+        doubao_key = self.get('DOUBAO_API_KEY')
+        
+        if not deepseek_key or deepseek_key == '':
+            errors.append("Missing required config: DEEPSEEK_API_KEY")
 
         return len(errors) == 0, errors
 

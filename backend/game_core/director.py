@@ -564,3 +564,119 @@ class PlotDirector:
             }
             for char in self.game_state.characters
         ]
+
+    def direct_multi_segment_story(
+        self,
+        segments: List[Dict[str, Any]],
+        base_narrative: str = ""
+    ) -> Dict[str, Any]:
+        """
+        导演多段连续故事（分段演出专用）
+
+        参数：
+        - segments: StorySegment.to_dict() 返回的段落列表
+        - base_narrative: 基础叙述
+
+        返回：
+        - 包含所有段落导演输出的完整响应
+        """
+        logger.info(f"开始多段连续演出：共 {len(segments)} 个段落")
+
+        all_performances = []
+        global_metadata = {
+            'total_segments': len(segments),
+            'total_actions': sum(seg.get('action_count', 0) for seg in segments),
+            'base_narrative': base_narrative
+        }
+
+        for i, segment in enumerate(segments):
+            segment_id = segment.get('segment_id', i + 1)
+            actions = segment.get('actions', [])
+            narrative = segment.get('narrative', '')
+            scene_context = segment.get('scene_context', '')
+
+            logger.info(f"  处理段落 {segment_id}: {len(actions)}个动作, 场景={scene_context}")
+
+            # 为每个段落生成导演输出
+            try:
+                # 重置状态更新器
+                self.updater.reset()
+
+                # 验证并过滤动作
+                valid_actions = self._validate_and_filter_actions(actions)
+
+                # 模拟执行
+                executed_actions = self._simulate_execution(valid_actions)
+
+                # 生成表演序列
+                full_narrative = f"场景：{scene_context} - {narrative}" if scene_context else narrative
+                performance_sequence = self._generate_performance_sequence(executed_actions, full_narrative)
+
+                # 提取关键信息
+                character_action = self._extract_character_action(executed_actions)
+                dialogue = self._extract_dialogue(executed_actions)
+
+                segment_performance = {
+                    'segment_id': segment_id,
+                    'turn_id': self.turn_counter + i,
+                    'narrative': full_narrative,
+                    'character_action': character_action,
+                    'dialogue': dialogue,
+                    'performance_sequence': performance_sequence,
+                    'scene_context': scene_context,
+                    'characters_in_segment': segment.get('characters', []),
+                    'metadata': {
+                        'actions_count': len(actions),
+                        'valid_actions_count': len(valid_actions),
+                        'performance_steps': len(performance_sequence),
+                        **segment.get('metadata', {})
+                    }
+                }
+
+                all_performances.append(segment_performance)
+                logger.info(f"  段落 {segment_id} 导演完成: {len(performance_sequence)}个表演步骤")
+
+            except Exception as e:
+                logger.error(f"  段落 {segment_id} 导演失败: {e}", exc_info=True)
+                all_performances.append({
+                    'segment_id': segment_id,
+                    'error': str(e),
+                    'narrative': narrative,
+                    'scene_context': scene_context
+                })
+
+        # 构建完整响应
+        multi_segment_response = {
+            'success': True,
+            'is_multi_segment': True,
+            'total_segments': len(segments),
+            'segments': all_performances,
+            'global_metadata': global_metadata,
+            # 全局选项（在最后一段显示）
+            'next_options': self._generate_default_options(),
+            # 汇总信息
+            'summary': {
+                'total_performance_steps': sum(
+                    seg.get('metadata', {}).get('performance_steps', 0)
+                    for seg in all_performances
+                    if 'metadata' in seg
+                ),
+                'scenes_used': list(set(
+                    seg.get('scene_context', '')
+                    for seg in all_performances
+                    if seg.get('scene_context')
+                )),
+                'all_characters': list(set(
+                    char
+                    for seg in all_performances
+                    for char in seg.get('characters_in_segment', [])
+                ))
+            }
+        }
+
+        # 更新回合计数器
+        self.turn_counter += len(segments)
+
+        logger.info(f"多段连续演出完成：共处理 {len(all_performances)} 个段落")
+
+        return multi_segment_response

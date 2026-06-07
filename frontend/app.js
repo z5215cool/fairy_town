@@ -9,7 +9,8 @@ class FairyTownSystem {
             theme: 'fairy',
             animation: true,
             sound: false,
-            autosave: true
+            autosave: true,
+            useDoubaoAI: false  // 默认不使用豆包AI，只有选择"输入自定义故事"时才启用
         };
         this.dialogueState = {
             isPaused: false,
@@ -42,7 +43,7 @@ class FairyTownSystem {
 
         // 新增：图片生成配置
         this.imageConfig = {
-            apiKey: '', // nanobanana API密钥，需要用户配置
+            apiKey: '', // 火山引擎方舟API密钥，需要用户配置
             imageSize: '2K',
             mapAspectRatio: '16:9',
             characterAspectRatio: '3:4'
@@ -121,9 +122,22 @@ class FairyTownSystem {
             this.analyzeStoryText();
         });
 
-        // 加载示例按钮
+        // 加载示例按钮 - 改为打开故事选择模态框
         document.getElementById('load-sample').addEventListener('click', () => {
-            this.loadSampleStory();
+            this.openStorySelectModal();
+        });
+
+        // 故事选择模态框按钮
+        document.getElementById('use-sample-story').addEventListener('click', () => {
+            this.useSampleStory();
+        });
+
+        document.getElementById('use-custom-story').addEventListener('click', () => {
+            this.useCustomStory();
+        });
+
+        document.getElementById('close-story-select').addEventListener('click', () => {
+            this.closeModal('story-select-modal');
         });
 
         // 故事续写按钮
@@ -516,7 +530,7 @@ class FairyTownSystem {
 
 
     // 故事文本分析
-    analyzeStoryText() {
+    async analyzeStoryText() {
         const text = document.getElementById('story-input').value.trim();
 
         if (!text) {
@@ -526,34 +540,120 @@ class FairyTownSystem {
 
         this.showSystemMessage('正在分析文本...');
 
-        // 调用后端文本分析接口
-        fetch('http://localhost:5000/api/analyze-text', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                text: text,
-                scene: this.currentScene
-            })
-        })
-        .then(response => response.json())
-        .then(data => {
+        try {
+            // 调用后端文本分析接口
+            const response = await fetch('http://localhost:5000/api/analyze-text', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    text: text,
+                    scene: this.currentScene
+                })
+            });
+            const data = await response.json();
+
             if (data.success) {
-                console.log('后端返回:', data);  // 调试用
-                this.showSystemMessage('后端收到的内容: ' + data.received.text);  // 显示在后端收到的内容
+                console.log('后端返回:', data);
+                this.showSystemMessage('后端收到的内容: ' + data.received.text);
+                
+                // 先更新角色列表，然后再生成图片
+                if (data.characters) {
+                    this.characters = data.characters;
+                    console.log('角色列表已更新:', this.characters.map(c => c.name));
+                }
+                
+                // 如果用户选择使用自定义故事，调用豆包AI生成像素画风图片
+                if (this.settings.useDoubaoAI) {
+                    this.showSystemMessage('正在使用豆包AI生成图片素材...');
+                    await this.generatePixelImages(text, data.characters);
+                }
+                
+                // 处理分析结果（包括开始故事表演）
                 this.handleAnalysisResult(data);
             } else {
                 this.showNotification(data.error || '文本分析失败', 'error');
             }
-        })
-        .catch(error => {
+        } catch (error) {
             console.error('Analysis error:', error);
             // 降级到模拟分析
             this.showSystemMessage('后端连接失败，使用本地分析...');
             const mockResult = this.simulateTextAnalysis(text);
             this.handleAnalysisResult(mockResult);
-        });
+        }
+    }
+
+    // 使用豆包AI生成像素画风图片
+    async generatePixelImages(text, characters) {
+        this.showSystemMessage('正在使用豆包AI生成像素画风图片...');
+
+        try {
+            const response = await fetch('http://localhost:5000/api/doubao/images/generate-all', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                text: text,
+                characters: characters.map(c => ({
+                    name: c.name,
+                    description: c.description || c.role || ''
+                })),
+                api_key: this.imageConfig.apiKey
+            })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                this.showSystemMessage('像素画风图片生成成功！');
+                console.log('图片生成响应:', data);
+                
+                // 更新背景图片
+                if (data.background && data.background.image_url) {
+                    this.currentScene = data.scene_type;
+                    this.updateSceneBackground(data.background.image_url);
+                    console.log('背景图片已更新:', data.background.image_url);
+                }
+
+                // 更新角色图片
+                if (data.characters && data.characters.length > 0) {
+                    console.log('开始更新角色图片，共', data.characters.length, '个角色');
+                    console.log('当前角色列表:', this.characters.map(c => c.name));
+                    let updatedCount = 0;
+                    data.characters.forEach(char => {
+                        if (char.image_url && char.name) {
+                            console.log('尝试匹配角色:', char.name);
+                            const existingChar = this.characters.find(c => c.name === char.name);
+                            if (existingChar) {
+                                existingChar.image = char.image_url;
+                                updatedCount++;
+                                console.log('成功更新角色图片:', char.name, char.image_url);
+                            } else {
+                                console.log('未找到角色:', char.name, '- 当前列表:', this.characters.map(c => c.name));
+                            }
+                        } else if (char.error) {
+                            console.log('角色生成失败:', char.name, char.error);
+                        } else {
+                            console.log('角色数据不完整:', char);
+                        }
+                    });
+                    console.log('共更新', updatedCount, '个角色图片');
+                    this.updateCharacterList();
+                    this.updateSceneCharacters();
+                } else {
+                    console.log('没有角色数据或角色数组为空');
+                    this.showNotification('角色图片生成失败或无角色数据', 'warning');
+                }
+            } else {
+                console.error('图片生成失败:', data.error);
+                this.showNotification(data.error || '图片生成失败', 'error');
+            }
+        } catch (error) {
+            console.error('Pixel image generation error:', error);
+            this.showNotification('图片生成失败，请检查豆包API配置', 'error');
+        }
     }
 
     // 模拟文本分析（伪代码实现）
@@ -643,7 +743,16 @@ class FairyTownSystem {
         if (result.success) {
             console.log('处理分析结果:', result); // 详细调试信息
             
-            this.characters = result.characters;
+            // 更新角色列表，但保留已有的图片
+            if (result.characters) {
+                result.characters.forEach(newChar => {
+                    const existingChar = this.characters.find(c => c.name === newChar.name);
+                    if (existingChar && existingChar.image) {
+                        newChar.image = existingChar.image;
+                    }
+                });
+                this.characters = result.characters;
+            }
             this.currentScene = result.scene;
             
             // 根据故事内容自动切换主题
@@ -692,14 +801,16 @@ class FairyTownSystem {
                 this.saveCurrentState();
             }
 
-            // 自动生成图片素材
-            this.autoGenerateImages();
+            // 自动生成图片素材（仅在未手动生成时调用）
+            if (!this.settings.useDoubaoAI) {
+                this.autoGenerateImages();
+            }
         } else {
             this.showNotification('文本分析失败', 'error');
         }
     }
 
-    // 自动生成图片素材
+    // 自动生成图片素材（使用豆包AI）
     autoGenerateImages() {
         const storyText = document.getElementById('story-input').value;
         if (!storyText.trim()) {
@@ -707,19 +818,17 @@ class FairyTownSystem {
         }
 
         // 检查是否配置了API密钥
-        const apiKey = localStorage.getItem('nanobanana_api_key') || '';
+        const apiKey = this.imageConfig.apiKey || localStorage.getItem('nanobanana_api_key') || '';
         if (!apiKey.trim()) {
             this.showSystemMessage('未配置图片生成API密钥，跳过图片自动生成');
             return;
         }
 
-        this.showSystemMessage('正在自动生成图片素材...');
-        this.generateAndApplyImages(storyText, this.characters).then(result => {
-            if (result.success) {
-                this.showNotification(`成功生成 ${result.success_count} 个素材`, 'success');
-            } else {
-                this.showNotification(`图片生成失败: ${result.error}`, 'error');
-            }
+        this.showSystemMessage('正在使用豆包AI自动生成像素画风图片...');
+        this.generatePixelImages(storyText, this.characters).then(() => {
+            this.showNotification('像素画风图片生成完成', 'success');
+        }).catch(error => {
+            this.showNotification(`图片生成失败: ${error.message}`, 'error');
         });
     }
 
@@ -1201,8 +1310,43 @@ class FairyTownSystem {
         // 可以在这里添加更多逻辑，比如更新故事文本等
     }
 
-    // 加载示例故事
-    loadSampleStory() {
+    // 打开故事选择模态框
+    openStorySelectModal() {
+        this.openModal('story-select-modal');
+    }
+
+    // 使用示例故事（从后端获取）
+    async useSampleStory() {
+        this.closeModal('story-select-modal');
+        this.showSystemMessage('正在获取示例故事...');
+
+        // 使用示例故事时，不调用豆包AI，使用素材库中的默认图片
+        this.settings.useDoubaoAI = false;
+        localStorage.setItem('fairyTownSettings', JSON.stringify(this.settings));
+
+        try {
+            const response = await fetch('http://localhost:5000/api/story/sample');
+            const data = await response.json();
+            
+            if (data.success) {
+                document.getElementById('story-input').value = data.story;
+                this.showSystemMessage(`示例故事「${data.title}」已加载，将使用素材库中的图片`);
+            } else {
+                // 如果后端失败，使用本地示例
+                this.loadLocalSampleStory();
+            }
+        } catch (error) {
+            console.error('获取示例故事失败:', error);
+            this.loadLocalSampleStory();
+        }
+    }
+
+    // 使用本地示例故事（备用）
+    loadLocalSampleStory() {
+        // 使用示例故事时，不调用豆包AI，使用素材库中的默认图片
+        this.settings.useDoubaoAI = false;
+        localStorage.setItem('fairyTownSettings', JSON.stringify(this.settings));
+
         const sampleStory = `很久很久以前，在一个美丽的童话镇里，住着一个小女孩叫小红帽。有一天，妈妈让小红帽给住在森林深处的奶奶送蛋糕。
 
 小红帽戴着红色的帽子，提着篮子出发了。她穿过村庄，走进了茂密的森林。
@@ -1214,7 +1358,15 @@ class FairyTownSystem {
 大灰狼眼珠一转，想到了一个坏主意。他让小红帽去采花，自己却抄近路先到了奶奶家。`;
 
         document.getElementById('story-input').value = sampleStory;
-        this.showSystemMessage('示例故事已加载');
+        this.showSystemMessage('示例故事已加载（本地模式），将使用素材库中的图片');
+    }
+
+    // 使用自定义故事（使用豆包AI生成像素画风图片）
+    useCustomStory() {
+        this.closeModal('story-select-modal');
+        this.showSystemMessage('请在下方输入您的故事，分析时将使用豆包AI生成像素画风图片');
+        this.settings.useDoubaoAI = true;
+        localStorage.setItem('fairyTownSettings', JSON.stringify(this.settings));
     }
 
     // 故事续写

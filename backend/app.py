@@ -91,15 +91,23 @@ try:
     from provider.deepseek import DeepSeekProvider
     from game_core.game_state import GameState
     from game_core.director import PlotDirector
+    from game_core.story_segmenter import StorySegmenter, segment_story_auto
     from memory import MemoryStore
     from prompt_generator import generate_map_prompt, generate_character_prompt, generate_all_prompts
     from image_generator import create_image_generator, generate_map_image, generate_character_image
     from asset_manager import create_asset_manager, save_map_asset, save_character_asset, save_all_assets
+    from doubao_image_generator import (
+        create_doubao_image_generator,
+        generate_pixel_background,
+        generate_pixel_character
+    )
 except ImportError as e:
     print(f"警告: 无法导入配置模块 - {e}")
     config = None
     GameState = None
     PlotDirector = None
+    StorySegmenter = None
+    segment_story_auto = None
     MemoryStore = None
     generate_map_prompt = None
     generate_character_prompt = None
@@ -111,6 +119,9 @@ except ImportError as e:
     save_map_asset = None
     save_character_asset = None
     save_all_assets = None
+    create_doubao_image_generator = None
+    generate_pixel_background = None
+    generate_pixel_character = None
 
 app = Flask(__name__)
 
@@ -412,18 +423,18 @@ def extract_actions_by_rules(text: str, characters: List[Dict]) -> List[Dict[str
     # 2. 从文本中提取对话 - 改进策略
     # 先获取所有已知角色名称
     known_characters = [char.get('name', '').strip() for char in characters if char.get('name')]
-    
+
     # 扩展的对话动词列表
     speak_verbs = r'(说|问|道|应道|答道|回答|喊道|叫着|说道|问到|问到|说着|回应|喊|吼|低声嘀咕|冷笑)'
-    
+
     # 用于存储已提取的对话，避免重复
     extracted_dialogues = set()
-    
+
     # 对每个已知角色，搜索他们说的话
     for char_name in known_characters:
         if not char_name:
             continue
-        
+
         # 使用更精确的模式：角色名后面跟着动词，然后是冒号和对话
         patterns_for_char = [
             # 精确匹配：角色名 + 动词 + 冒号 + 引号对话
@@ -432,35 +443,35 @@ def extract_actions_by_rules(text: str, characters: List[Dict]) -> List[Dict[str
             # 角色名 + 动词 + 冒号 + 无引号对话
             r'\b' + re.escape(char_name) + r'\b[，。！？\s]*' + speak_verbs + r'[：:]([^，。！？"“”]{1,200})[，。！？]',
         ]
-        
+
         for pattern in patterns_for_char:
             matches = re.findall(pattern, text)
             for match in matches[:5]:  # 每个角色最多提取5句对话
                 # 匹配结果就是对话内容
                 content = match.strip() if isinstance(match, str) else match[-1].strip()
-                
+
                 # 过滤掉太短或无效的内容
                 if not content or len(content) < 3:
                     continue
-                
+
                 # 去除开头的引号
                 if content.startswith('"') or content.startswith('“'):
                     content = content[1:]
                 if content.endswith('"') or content.endswith('”'):
                     content = content[:-1]
-                
+
                 # 检查是否已提取过相同的对话（去重）
                 content_key = content[:50]
                 if content_key in extracted_dialogues:
                     continue
                 extracted_dialogues.add(content_key)
-                
+
                 # 限制长度但不截断中间
                 if len(content) > 60:
                     content = content[:57] + "..."
-                
+
                 actions.append(create_action('speak', character=char_name, content=content))
-    
+
     # 3. 检测相遇事件
     meet_keywords = [
         '遇到', '碰到', '相见', '遇见', ' encounter ', ' meet ',
@@ -486,12 +497,12 @@ def extract_actions_by_rules(text: str, characters: List[Dict]) -> List[Dict[str
     move_targets = ['门口', '森林', '广场', '中心', '左边', '右边', '上方', '下方',
                     '深处', '小路', '奶奶家', 'door', 'forest', 'square', 'center',
                     'left', 'right', 'top', 'bottom', 'deep', 'path']
-    
+
     for char in characters:
         char_name = char.get('name', '')
         if not char_name:
             continue
-            
+
         # 检查是否有移动关键词
         has_move = any(keyword.lower() in text.lower() for keyword in move_keywords)
         if has_move:
@@ -501,9 +512,9 @@ def extract_actions_by_rules(text: str, characters: List[Dict]) -> List[Dict[str
                 if tgt in text:
                     target = tgt
                     break
-                    
+
             if target:
-                actions.append(create_action('move', character=char_name, target=target, 
+                actions.append(create_action('move', character=char_name, target=target,
                                            content=f"{char_name}移动到{target}"))
             else:
                 # 如果没有明确目标，使用默认目标
@@ -576,7 +587,7 @@ def extract_actions_by_ai(text: str, characters: List[Dict], provider) -> List[D
         # 首先移除可能的markdown代码块格式
         text_response = re.sub(r'```json\s*', '', text_response)
         text_response = re.sub(r'\s*```\s*$', '', text_response)
-        
+
         # 尝试直接解析
         try:
             actions = json.loads(text_response)
@@ -660,7 +671,7 @@ def analyze_text():
     if provider:
         logger.info("===== 优先使用AI提取动作 =====")
         actions = extract_actions_by_ai(text, characters, provider)
-        
+
         if actions and len(actions) > 0:
             logger.info(f"✅ AI提取动作成功: {len(actions)}个动作")
             extraction_method = "AI"
@@ -681,7 +692,7 @@ def analyze_text():
     for char in characters:
         saved_char = data_store.add_character(char)
         saved_characters.append(saved_char)
-    
+
     # 更新 GameState 的角色列表
     gs = get_game_state()
     if gs:
@@ -699,26 +710,26 @@ def analyze_text():
     # ===== 使用剧情导演控制流程 =====
     director_response = None
     director = get_plot_director()
-    
+
     if director and actions:
         try:
             logger.info(f"开始剧情导演处理，共 {len(actions)} 个动作")
-            
+
             # 生成后续选项（可以用 AI 生成，这里先用默认）
             next_options = generate_next_options(text, characters)
-            
+
             # 导演这个回合
             director_response = director.direct_turn(
                 raw_actions=actions,
                 narrative=f"场景：{detected_scene}",
                 next_options=next_options
             )
-            
+
             logger.info("剧情导演处理完成")
         except Exception as e:
             logger.error(f"剧情导演处理失败: {e}")
             director_response = None
-    
+
     # 返回时带上收到的原始内容（方便调试）
     response_data = {
         'success': True,
@@ -731,12 +742,76 @@ def analyze_text():
         'plotPoints': plot_points,
         'actions': actions  # 保留原始动作用于调试
     }
-    
+
     # 如果有导演响应，添加标准化的指令包
     if director_response:
         response_data['director_output'] = director_response
         logger.info("已添加导演输出到响应")
-    
+
+    # ===== 剧本分段处理 =====
+    story_segments = None
+    if StorySegmenter and actions and len(actions) > 0:
+        try:
+            segmenter = StorySegmenter()
+            segments = segmenter.segment_story(
+                raw_text=text,
+                actions=actions,
+                characters=characters,
+                current_scene=detected_scene
+            )
+
+            if len(segments) > 1:
+                # 需要分段的情况
+                story_segments = [seg.to_dict() for seg in segments]
+
+                # 为每个分段生成独立的导演输出（如果导演可用）
+                segmented_director_outputs = []
+                for seg in segments:
+                    if director:
+                        try:
+                            seg_director_output = director.direct_turn(
+                                raw_actions=seg.actions,
+                                narrative=f"场景：{seg.scene_context} - {seg.narrative}",
+                                next_options=generate_next_options(seg.narrative, characters)
+                            )
+                            segmented_director_outputs.append({
+                                'segment_id': seg.segment_id,
+                                'director_output': seg_director_output
+                            })
+                        except Exception as e:
+                            logger.error(f"段落 {seg.segment_id} 导演处理失败: {e}")
+                            segmented_director_outputs.append({
+                                'segment_id': seg.segment_id,
+                                'error': str(e)
+                            })
+                    else:
+                        segmented_director_outputs.append({
+                            'segment_id': seg.segment_id,
+                            'director_output': None
+                        })
+
+                response_data['story_segments'] = story_segments
+                response_data['segmented_director_outputs'] = segmented_director_outputs
+                response_data['segmentation_info'] = {
+                    'total_segments': len(segments),
+                    'total_actions': len(actions),
+                    'needs_segmentation': True,
+                    'message': f'剧本已自动分为 {len(segments)} 个段落进行演出'
+                }
+
+                logger.info(f"✅ 剧本已分段：共 {len(segments)} 个段落")
+            else:
+                # 不需要分段
+                response_data['segmentation_info'] = {
+                    'total_segments': 1,
+                    'total_actions': len(actions),
+                    'needs_segmentation': False,
+                    'message': '剧本较短，无需分段'
+                }
+        except Exception as e:
+            logger.error(f"剧本分段失败: {e}")
+            response_data['segmentation_error'] = str(e)
+
     return jsonify(response_data)
 
 
@@ -747,16 +822,16 @@ def generate_next_options(text: str, characters: List[Dict]) -> List[Dict[str, s
         {'label': '继续对话', 'action_input': 'continue conversation'},
         {'label': '询问更多细节', 'action_input': 'ask for details'},
     ]
-    
+
     # 根据文本内容添加特定选项
     if any(word in text for word in ['走', '去', '移动']):
         options.append({'label': '前往其他地方', 'action_input': 'go elsewhere'})
-    
+
     if any(word in text for word in ['说', '问', '告诉']):
         options.append({'label': '提出新问题', 'action_input': 'ask new question'})
-    
+
     options.append({'label': '结束互动', 'action_input': 'end interaction'})
-    
+
     return options[:4]  # 最多返回4个选项
 
 
@@ -1270,7 +1345,7 @@ def multi_agent_act():
 def execute_turn():
     """
     执行一个完整的剧情回合
-    
+
     请求体：
     {
         "text": "用户输入的剧情文本",
@@ -1278,7 +1353,7 @@ def execute_turn():
         "characters": [{"name": "角色名", ...}],  // 可选，不传则自动识别
         "session_id": "会话ID（可选）"
     }
-    
+
     返回标准化的导演指令包
     """
     data = request.get_json() or {}
@@ -1286,12 +1361,12 @@ def execute_turn():
     scene = data.get('scene', '')
     characters_input = data.get('characters', [])
     session_id = data.get('session_id')
-    
+
     if not text:
         return jsonify({'success': False, 'error': '文本不能为空'}), 400
-    
+
     logger.info(f"执行回合请求: {text[:50]}...")
-    
+
     # 1. 提取或更新角色
     if characters_input:
         characters = characters_input
@@ -1302,7 +1377,7 @@ def execute_turn():
         characters = extract_characters_from_text(text)
         for char in characters:
             data_store.add_character(char)
-    
+
     # 2. 更新 GameState
     gs = get_game_state()
     if gs:
@@ -1316,21 +1391,21 @@ def execute_turn():
             }
             for char in characters
         ]
-    
+
     # 3. AI 提取动作
     provider = get_llm_provider()
     actions = None
-    
+
     if provider:
         actions = extract_actions_by_ai(text, characters, provider)
         if actions:
             logger.info(f"AI提取动作成功: {len(actions)}个")
-    
+
     # 4. 规则兜底
     if not actions:
         actions = extract_actions_by_rules(text, characters)
         logger.info(f"规则提取动作: {len(actions)}个")
-    
+
     # 5. 使用导演系统处理
     director = get_plot_director()
     if not director:
@@ -1338,34 +1413,35 @@ def execute_turn():
             'success': False,
             'error': '剧情导演未初始化'
         }), 500
-    
+
     try:
         # 生成后续选项
         next_options = generate_next_options(text, characters)
-        
+
         # 检测场景
         detected_scene = scene or detect_scene_from_text(text)
-        
+
         # 导演这个回合
         director_response = director.direct_turn(
             raw_actions=actions,
             narrative=f"场景：{detected_scene}",
             next_options=next_options
         )
-        
+
         # 记录到 GameState
         gs.add_turn(text, {'text': director_response.get('narrative', '')})
-        
+
         # 保存到记忆系统
         ms = get_memory_store()
         if ms:
             if not session_id:
                 session_id = ms.create_session()
             ms.add_turn(session_id, text, director_response.get('narrative', ''))
-        
+
         logger.info("回合执行完成")
-        
-        return jsonify({
+
+        # 构建基础响应
+        response_data = {
             'success': True,
             'session_id': session_id,
             'director_output': director_response,
@@ -1374,7 +1450,65 @@ def execute_turn():
                 'characters_count': len(characters),
                 'actions_count': len(actions)
             }
-        })
+        }
+
+        # ===== 剧本分段处理 =====
+        if StorySegmenter and actions and len(actions) > 0:
+            try:
+                segmenter = StorySegmenter()
+                segments = segmenter.segment_story(
+                    raw_text=text,
+                    actions=actions,
+                    characters=characters,
+                    current_scene=detected_scene
+                )
+
+                if len(segments) > 1:
+                    # 需要分段
+                    story_segments = [seg.to_dict() for seg in segments]
+
+                    # 为每个分段生成独立的导演输出
+                    segmented_director_outputs = []
+                    for seg in segments:
+                        try:
+                            seg_director_output = director.direct_turn(
+                                raw_actions=seg.actions,
+                                narrative=f"场景：{seg.scene_context} - {seg.narrative}",
+                                next_options=generate_next_options(seg.narrative, characters)
+                            )
+                            segmented_director_outputs.append({
+                                'segment_id': seg.segment_id,
+                                'director_output': seg_director_output
+                            })
+                        except Exception as e:
+                            logger.error(f"段落 {seg.segment_id} 导演处理失败: {e}")
+                            segmented_director_outputs.append({
+                                'segment_id': seg.segment_id,
+                                'error': str(e)
+                            })
+
+                    response_data['story_segments'] = story_segments
+                    response_data['segmented_director_outputs'] = segmented_director_outputs
+                    response_data['segmentation_info'] = {
+                        'total_segments': len(segments),
+                        'total_actions': len(actions),
+                        'needs_segmentation': True,
+                        'message': f'剧本已自动分为 {len(segments)} 个段落进行演出'
+                    }
+
+                    logger.info(f"✅ 剧本已分段：共 {len(segments)} 个段落")
+                else:
+                    response_data['segmentation_info'] = {
+                        'total_segments': 1,
+                        'total_actions': len(actions),
+                        'needs_segmentation': False,
+                        'message': '剧本较短，无需分段'
+                    }
+            except Exception as e:
+                logger.error(f"剧本分段失败: {e}")
+                response_data['segmentation_error'] = str(e)
+
+        return jsonify(response_data)
     
     except Exception as e:
         logger.error(f"执行回合失败: {e}", exc_info=True)
@@ -2170,6 +2304,327 @@ def continue_story():
         return jsonify({
             'success': False,
             'error': f'续写失败: {str(e)}'
+        }), 500
+
+
+# ==================== 调试测试 API ====================
+
+@app.route('/api/test/config', methods=['GET'])
+def test_config():
+    """测试配置加载"""
+    if config:
+        return jsonify({
+            'success': True,
+            'ARK_API_KEY_exists': bool(config.get('ARK_API_KEY')),
+            'ARK_API_KEY_length': len(config.get('ARK_API_KEY', '')),
+            'DOUBAO_IMAGE_URL': config.get('DOUBAO_IMAGE_URL'),
+            'DOUBAO_IMAGE_MODEL': config.get('DOUBAO_IMAGE_MODEL'),
+            'config_keys': list(config.all().keys())
+        })
+    else:
+        return jsonify({'success': False, 'error': 'config is None'})
+
+
+# ==================== 故事选择 API ====================
+
+@app.route('/api/story/sample', methods=['GET'])
+def get_sample_story():
+    """
+    获取示例故事（小红帽故事）
+    
+    返回：
+    {
+        "success": true,
+        "story": "示例故事文本",
+        "title": "故事标题"
+    }
+    """
+    sample_story = """很久很久以前，在一个美丽的童话镇里，住着一个小女孩叫小红帽。有一天，妈妈让小红帽给住在森林深处的奶奶送蛋糕。
+
+小红帽戴着红色的帽子，提着篮子出发了。她穿过村庄，走进了茂密的森林。
+
+在森林里，小红帽遇到了一只大灰狼。大灰狼问她："小姑娘，你要去哪里呀？"
+
+小红帽天真地回答："我要去奶奶家送蛋糕。"
+
+大灰狼眼珠一转，想到了一个坏主意。他让小红帽去采花，自己却抄近路先到了奶奶家。"""
+    
+    return jsonify({
+        'success': True,
+        'story': sample_story,
+        'title': '小红帽',
+        'description': '经典童话小红帽的故事开头'
+    })
+
+
+# ==================== 豆包AI像素画风图片生成 API ====================
+
+@app.route('/api/doubao/images/generate-pixel-background', methods=['POST'])
+def generate_pixel_background_api():
+    """
+    使用豆包AI生成像素画风的背景图片
+    
+    请求体：
+    {
+        "scene_description": "场景描述",
+        "api_key": "火山引擎方舟API Key（可选，不填则使用配置文件中的密钥）"
+    }
+    
+    返回：
+    {
+        "success": true,
+        "image_url": "生成的图片URL",
+        "prompt": "使用的提示词"
+    }
+    """
+    data = request.get_json() or {}
+    scene_description = data.get('scene_description', '')
+    api_key = data.get('api_key', '')
+    
+    # 如果没有传入API密钥，尝试从配置中获取
+    if not api_key:
+        api_key = config.get('ARK_API_KEY', '') if config else ''
+    
+    if not scene_description:
+        return jsonify({'success': False, 'error': '场景描述不能为空'}), 400
+    
+    if not api_key:
+        return jsonify({'success': False, 'error': 'API密钥不能为空'}), 400
+    
+    if not generate_pixel_background:
+        return jsonify({'success': False, 'error': '豆包图片生成器未加载'}), 500
+    
+    try:
+        logger.info(f"开始使用豆包AI生成像素背景: {scene_description[:30]}...")
+        result = generate_pixel_background(api_key, scene_description)
+        
+        if result.get('success'):
+            logger.info(f"像素背景生成成功: {result['image_url']}")
+            return jsonify({
+                'success': True,
+                'image_url': result['image_url'],
+                'prompt': result['prompt'],
+                'scene_description': scene_description
+            })
+        else:
+            logger.error(f"像素背景生成失败: {result.get('error')}")
+            return jsonify({
+                'success': False,
+                'error': result.get('error', '生成失败')
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"生成像素背景异常: {e}")
+        return jsonify({
+            'success': False,
+            'error': f'生成失败: {str(e)}'
+        }), 500
+
+
+@app.route('/api/doubao/images/generate-pixel-character', methods=['POST'])
+def generate_pixel_character_api():
+    """
+    使用豆包AI生成像素画风的角色人物图片
+    
+    请求体：
+    {
+        "character_name": "角色名称",
+        "character_description": "角色描述（可选）",
+        "api_key": "火山引擎方舟API Key（可选，不填则使用配置文件中的密钥）"
+    }
+    
+    返回：
+    {
+        "success": true,
+        "image_url": "生成的图片URL",
+        "prompt": "使用的提示词",
+        "character_name": "角色名称"
+    }
+    """
+    data = request.get_json() or {}
+    character_name = data.get('character_name', '')
+    character_description = data.get('character_description', '')
+    api_key = data.get('api_key', '')
+    
+    # 如果没有传入API密钥，尝试从配置中获取
+    if not api_key:
+        api_key = config.get('ARK_API_KEY', '') if config else ''
+    
+    if not character_name:
+        return jsonify({'success': False, 'error': '角色名称不能为空'}), 400
+    
+    if not api_key:
+        return jsonify({'success': False, 'error': 'API密钥不能为空'}), 400
+    
+    if not generate_pixel_character:
+        return jsonify({'success': False, 'error': '豆包图片生成器未加载'}), 500
+    
+    try:
+        logger.info(f"开始使用豆包AI生成像素角色: {character_name}")
+        result = generate_pixel_character(api_key, character_name, character_description)
+        
+        if result.get('success'):
+            logger.info(f"像素角色生成成功: {result['image_url']}")
+            return jsonify({
+                'success': True,
+                'image_url': result['image_url'],
+                'prompt': result['prompt'],
+                'character_name': character_name,
+                'character_description': character_description
+            })
+        else:
+            logger.error(f"像素角色生成失败: {result.get('error')}")
+            return jsonify({
+                'success': False,
+                'error': result.get('error', '生成失败')
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"生成像素角色异常: {e}")
+        return jsonify({
+            'success': False,
+            'error': f'生成失败: {str(e)}'
+        }), 500
+
+
+@app.route('/api/doubao/images/generate-all', methods=['POST'])
+def generate_all_pixel_images_api():
+    """
+    使用豆包AI批量生成像素画风的背景和角色图片
+    
+    请求体：
+    {
+        "text": "故事文本",
+        "characters": [
+            {"name": "角色1", "description": "描述1"},
+            {"name": "角色2", "description": "描述2"}
+        ],
+        "api_key": "火山引擎方舟API Key（可选）"
+    }
+    
+    返回：
+    {
+        "success": true,
+        "background": {"image_url": "...", "prompt": "..."},
+        "characters": [{"name": "...", "image_url": "...", "prompt": "..."}, ...],
+        "scene_type": "场景类型"
+    }
+    """
+    data = request.get_json() or {}
+    text = data.get('text', '')
+    characters_input = data.get('characters', [])
+    api_key = data.get('api_key', '')
+    
+    # 如果没有传入API密钥，尝试从配置中获取
+    if not api_key:
+        api_key = config.get('ARK_API_KEY', '') if config else ''
+    
+    if not text:
+        return jsonify({'success': False, 'error': '故事文本不能为空'}), 400
+    
+    if not api_key:
+        return jsonify({'success': False, 'error': 'API密钥不能为空'}), 400
+    
+    if not generate_pixel_background or not generate_pixel_character:
+        return jsonify({'success': False, 'error': '豆包图片生成器未加载'}), 500
+    
+    try:
+        # 1. 检测场景类型（用于返回信息，不用于生成图片）
+        scene_type = detect_scene_from_text(text)
+        
+        # 2. 使用DeepSeek分析用户输入文本，生成背景图片提示词
+        background_prompt = None
+        if DeepSeekProvider:
+            llm = get_llm_provider()
+            if llm:
+                # 提示DeepSeek从故事文本中提取场景描述
+                analysis_prompt = f"""分析以下故事文本，提取其中的场景环境描述：
+
+{text}
+
+请输出详细的场景描述，包含地点、环境、氛围等信息，用于生成像素画风的背景图片。不要提及"童话镇"。输出格式：直接输出场景描述文本。"""
+                
+                try:
+                    result = llm.call(analysis_prompt)
+                    if result and result.get('text'):
+                        background_prompt = result['text'].strip()
+                        logger.info(f"DeepSeek分析结果: {background_prompt}")
+                    else:
+                        logger.warning("DeepSeek未返回有效结果")
+                except Exception as e:
+                    logger.warning(f"调用DeepSeek失败: {e}")
+        
+        # 如果DeepSeek未返回有效结果，使用通用场景描述（不再使用"童话镇广场"）
+        if not background_prompt or background_prompt.strip() == '' or background_prompt == '童话镇广场':
+            # 根据场景类型生成通用描述，避免使用"童话镇广场"
+            scene_descriptions = {
+                '森林': '神秘的森林，树木茂密，阳光透过树叶洒落',
+                '城堡': '宏伟的城堡，高耸的塔楼，古老的城墙',
+                '村庄': '宁静的村庄，茅草屋顶的小屋，蜿蜒的小路',
+                '河流': '清澈的河流，河畔风光，芦苇摇曳',
+            }
+            background_prompt = scene_descriptions.get(scene_type, 'fantasy landscape with magical atmosphere')
+            logger.info(f"使用通用场景描述: {background_prompt}")
+        
+        # 3. 生成背景图片（使用生成的提示词）
+        logger.info(f"生成像素背景: {background_prompt}")
+        background_result = generate_pixel_background(api_key, background_prompt)
+        
+        if not background_result.get('success'):
+            return jsonify({
+                'success': False,
+                'error': f'背景生成失败: {background_result.get("error")}'
+            }), 500
+        
+        # 4. 如果没有传入角色，从文本中提取
+        characters = characters_input if characters_input else extract_characters_from_text(text)
+        
+        # 5. 生成角色图片
+        character_images = []
+        for char in characters:
+            char_name = char.get('name', '')
+            char_desc = char.get('description', '')
+            
+            logger.info(f"生成像素角色: {char_name}")
+            char_result = generate_pixel_character(api_key, char_name, char_desc)
+            
+            if char_result.get('success'):
+                character_images.append({
+                    'name': char_name,
+                    'image_url': char_result['image_url'],
+                    'prompt': char_result['prompt'],
+                    'description': char_desc,
+                    'role': char.get('role', ''),
+                    'position': char.get('position', {}),
+                    'emotion': char.get('emotion', 'neutral')
+                })
+            else:
+                logger.warning(f"角色 {char_name} 生成失败: {char_result.get('error')}")
+                character_images.append({
+                    'name': char_name,
+                    'error': char_result.get('error', '生成失败'),
+                    'description': char_desc
+                })
+        
+        logger.info(f"批量像素图片生成完成: 背景1张, 角色{len(character_images)}张")
+        
+        return jsonify({
+            'success': True,
+            'background': {
+                'image_url': background_result['image_url'],
+                'prompt': background_result['prompt'],
+                'scene_type': scene_type
+            },
+            'characters': character_images,
+            'scene_type': scene_type,
+            'total_characters': len(character_images)
+        })
+        
+    except Exception as e:
+        logger.error(f"批量生成像素图片异常: {e}")
+        return jsonify({
+            'success': False,
+            'error': f'生成失败: {str(e)}'
         }), 500
 
 

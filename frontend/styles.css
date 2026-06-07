@@ -854,6 +854,60 @@ body {
     background: white;
 }
 
+/* 故事选择模态框样式 */
+.story-select-options {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.story-option {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 20px;
+    border: 2px solid var(--border-color);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    background: var(--bg-primary);
+}
+
+.story-option:hover {
+    border-color: var(--primary-color);
+    background: rgba(var(--primary-color), 0.05);
+    transform: translateX(5px);
+}
+
+.story-option .option-icon {
+    font-size: 3rem;
+    width: 60px;
+    height: 60px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, var(--primary-color), rgba(var(--primary-color), 0.7));
+    border-radius: 12px;
+    color: white;
+}
+
+.story-option .option-content {
+    flex: 1;
+}
+
+.story-option .option-content h3 {
+    margin: 0 0 8px 0;
+    font-size: 1.1rem;
+    color: var(--text-primary);
+}
+
+.story-option .option-content p {
+    margin: 0;
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
 .setting-group input[type="checkbox"] {
     margin-right: 8px;
 }
